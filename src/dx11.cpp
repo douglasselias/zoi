@@ -110,7 +110,7 @@ struct Pipeline
   ID3D11BlendState *blend_state;
 };
 
-Pipeline init_dx11(Window window)
+Pipeline init_gfx(Window window)
 {
   Pipeline pipeline = {};
 
