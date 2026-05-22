@@ -105,11 +105,9 @@ struct Pipeline
   ID3D11DeviceContext *device_context;
   ID3D11RenderTargetView *rtv;
   D3D11_VIEWPORT viewport;
-  ID3D11Buffer *vertex_buffer;
-  ID3D11Buffer *index_buffer;
-  ID3D11InputLayout *input_layout;
   ID3D11VertexShader *vs;
   ID3D11PixelShader *ps;
+  ID3D11BlendState *blend_state;
 };
 
 Pipeline init_dx11(Window window)
@@ -127,8 +125,10 @@ Pipeline init_dx11(Window window)
   swap_chain_desc.SwapEffect           = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   
   D3D_FEATURE_LEVEL feature_levels[] = { D3D_FEATURE_LEVEL_11_0 };
+
+  u32 flags = D3D11_CREATE_DEVICE_DEBUG;
   
-  D3D11CreateDeviceAndSwapChain(null, D3D_DRIVER_TYPE_HARDWARE, null, 0, feature_levels, ARRAYSIZE(feature_levels), D3D11_SDK_VERSION, &swap_chain_desc, &pipeline.swap_chain, &pipeline.device, null, &pipeline.device_context);
+  D3D11CreateDeviceAndSwapChain(null, D3D_DRIVER_TYPE_HARDWARE, null, flags, feature_levels, ARRAYSIZE(feature_levels), D3D11_SDK_VERSION, &swap_chain_desc, &pipeline.swap_chain, &pipeline.device, null, &pipeline.device_context);
 
   //// Create Viewport ////
   pipeline.swap_chain->GetDesc(&swap_chain_desc);
@@ -147,45 +147,20 @@ Pipeline init_dx11(Window window)
   
   pipeline.device->CreateRenderTargetView(rtv_texture, &rtv_desc, &pipeline.rtv);
 
-  //// Create Vertex Buffer ////
-  // Fullscreen quad vertices (position + UV) //
-  f32 vertices[] =
-  {
-    -1.0f,  1.0f, 0.0f, 0.0f,  // top-left
-    -1.0f, -1.0f, 0.0f, 1.0f,  // bottom-left
-     1.0f,  1.0f, 1.0f, 0.0f,  // top-right
-     1.0f, -1.0f, 1.0f, 1.0f,  // bottom-right
-  };
-
-  D3D11_BUFFER_DESC vertices_buffer_desc = {};
-  vertices_buffer_desc.ByteWidth = sizeof(vertices);
-  vertices_buffer_desc.Usage     = D3D11_USAGE_IMMUTABLE;
-  vertices_buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-  
-  D3D11_SUBRESOURCE_DATA vertices_subresource = { vertices };
-  pipeline.device->CreateBuffer(&vertices_buffer_desc, &vertices_subresource, &pipeline.vertex_buffer);
-
-  u16 indices[] =
-  {
-    0, 1, 2,
-    1, 2, 0,
-  };
-
-  D3D11_BUFFER_DESC indices_buffer_desc = {};
-  indices_buffer_desc.ByteWidth = sizeof(indices);
-  indices_buffer_desc.Usage     = D3D11_USAGE_IMMUTABLE;
-  indices_buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-
-  D3D11_SUBRESOURCE_DATA indices_subresource = { indices };
-  // pipeline.device->CreateBuffer(&indices_buffer_desc, &indices_subresource, &pipeline.index_buffer);
-
-  //// Create shaders ////
   char *shader_source = 
-  R"""(
-    struct VS_Input
+  R"(
+    struct Vertex
     {
-      float2 position : POSITION;
-      float2 uv       : TEXCOORD;
+      float2 position;
+      float2 uv;
+    };
+
+    static Vertex vertices[4] =
+    {
+      { float2(-1.0f,  1.0f), float2(0.0f, 0.0f) },  // Top-left
+      { float2( 1.0f,  1.0f), float2(1.0f, 0.0f) },  // Top-right
+      { float2(-1.0f, -1.0f), float2(0.0f, 1.0f) },  // Bottom-left
+      { float2( 1.0f, -1.0f), float2(1.0f, 1.0f) },  // Bottom-right
     };
 
     struct VS_Output
@@ -194,11 +169,12 @@ Pipeline init_dx11(Window window)
       float2 uv       : TEXCOORD;
     };
 
-    VS_Output vs_main(VS_Input input)
+    VS_Output vs_main(uint id : SV_VertexID)
     {
       VS_Output output;
-      output.position = float4(input.position, 0, 1);
-      output.uv       = input.uv;
+      Vertex vertex     = vertices[id];
+      output.position   = float4(vertex.position, 0.0f, 1.0f);
+      output.uv         = vertex.uv;
       return output;
     }
 
@@ -207,9 +183,9 @@ Pipeline init_dx11(Window window)
 
     float4 ps_main(VS_Output input) : SV_TARGET
     {
-      return main_texture.Sample(main_sampler, input.uv);
-    }  
-  )""";
+      return main_texture.Sample(main_sampler, input.uv).abgr; // TODO: Little endian shenanigans
+    }
+  )";
   s64 shader_size = strlen(shader_source);
   
   ID3DBlob *vs_blob;
@@ -220,14 +196,17 @@ Pipeline init_dx11(Window window)
   D3DCompile(shader_source, shader_size, null, null, null, "ps_main", "ps_5_0", 0, 0, &ps_blob, null);
   pipeline.device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), null, &pipeline.ps);
 
-  //// Create Input Layout ////
-  D3D11_INPUT_ELEMENT_DESC input_element_desc[] =
-  {
-    { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-  };
-
-  pipeline.device->CreateInputLayout(input_element_desc, ARRAYSIZE(input_element_desc), vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), &pipeline.input_layout);
+  // TODO: Test without blending.
+  D3D11_BLEND_DESC desc = {};
+  desc.RenderTarget[0].BlendEnable           = true;
+  desc.RenderTarget[0].SrcBlend              = D3D11_BLEND_SRC_ALPHA;
+  desc.RenderTarget[0].DestBlend             = D3D11_BLEND_INV_SRC_ALPHA;
+  desc.RenderTarget[0].BlendOp               = D3D11_BLEND_OP_ADD;
+  desc.RenderTarget[0].SrcBlendAlpha         = D3D11_BLEND_ONE;
+  desc.RenderTarget[0].DestBlendAlpha        = D3D11_BLEND_ZERO;
+  desc.RenderTarget[0].BlendOpAlpha          = D3D11_BLEND_OP_ADD;
+  desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+  pipeline.device->CreateBlendState(&desc, &pipeline.blend_state);
 
   return pipeline;
 }
@@ -239,38 +218,18 @@ struct RenderBuffer
   u32 *pixel_buffer;
   u32 width;
   u32 height;
+  u32 area;
 };
-
-void render_frame(Pipeline pipeline, RenderBuffer render_buffer)
-{
-  f32 background_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-  pipeline.device_context->ClearRenderTargetView(pipeline.rtv, background_color);
-
-  u32 stride = 4 * sizeof(f32);
-  u32 offset = 0;
-  // pipeline.device_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  pipeline.device_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  pipeline.device_context->IASetInputLayout(pipeline.input_layout);
-  pipeline.device_context->IASetVertexBuffers(0, 1, &pipeline.vertex_buffer, &stride, &offset);
-  // pipeline.device_context->IASetIndexBuffer(pipeline.index_buffer, DXGI_FORMAT_R16_UINT, 0);
-  
-  pipeline.device_context->VSSetShader(pipeline.vs, null, 0);
-  pipeline.device_context->PSSetShader(pipeline.ps, null, 0);
-  pipeline.device_context->PSSetShaderResources(0, 1, &render_buffer.texture_srv);
-
-  pipeline.device_context->RSSetViewports(1, &pipeline.viewport);
-  pipeline.device_context->OMSetRenderTargets(1, &pipeline.rtv, null);
-
-  pipeline.device_context->Draw(4, 0);
-  // pipeline.device_context->DrawIndexed(4, 0, 0);
-
-  pipeline.swap_chain->Present(1, 0);
-}
 
 RenderBuffer create_main_buffer(Pipeline pipeline, u32 width, u32 height)
 {
+  RenderBuffer result = {};
+  result.width  = width;
+  result.height = height;
+  result.area = width * height;
+
   u32 pitch = width * sizeof(u32);
-  u32 *pixel_buffer = (u32*)calloc(1, pitch * height);
+  result.pixel_buffer = (u32*)calloc(1, pitch * height);
 
   D3D11_TEXTURE2D_DESC texture_desc = {};
   texture_desc.Width            = width;
@@ -284,22 +243,58 @@ RenderBuffer create_main_buffer(Pipeline pipeline, u32 width, u32 height)
   texture_desc.SampleDesc.Count = 1;
 
   D3D11_SUBRESOURCE_DATA subresource = {};
-  subresource.pSysMem     = pixel_buffer;
+  subresource.pSysMem     = result.pixel_buffer;
   subresource.SysMemPitch = pitch;
-
-  RenderBuffer result = {};
 
   pipeline.device->CreateTexture2D(&texture_desc, &subresource, &result.texture_2d);
   pipeline.device->CreateShaderResourceView(result.texture_2d, null, &result.texture_srv);
 
-  result.pixel_buffer = pixel_buffer;
-  result.width        = width;
-  result.height       = height;
-
   return result;
 }
 
-void clear_buffer(RenderBuffer *render_buffer)
+void clear_buffer(RenderBuffer *buffer)
 {
-  memset(render_buffer->pixel_buffer, 0, render_buffer->width * render_buffer->height * sizeof(u32));
+  for(u32 y = 0; y < buffer->height; y++)
+  {
+    for(u32 x = 0; x < buffer->width; x++)
+    {
+      buffer->pixel_buffer[x + y * buffer->width] = 0x000000ff;
+    }
+  }
+}
+
+void present_frame(Pipeline pipeline, RenderBuffer *buffer)
+{
+  D3D11_MAPPED_SUBRESOURCE mapped_resource;
+  pipeline.device_context->Map(buffer->texture_2d, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource);
+  
+  u32 pitch = buffer->width * sizeof(u32);
+  for(u32 y = 0; y < buffer->height; y++)
+  {
+    u8 *dest = (u8*)mapped_resource.pData + y * mapped_resource.RowPitch;
+    u8 *src  = (u8*)buffer->pixel_buffer  + y * pitch;
+    memcpy(dest, src, pitch);
+  }
+  
+  pipeline.device_context->Unmap(buffer->texture_2d, 0);
+}
+
+void render_frame(Pipeline pipeline, RenderBuffer render_buffer)
+{
+  f32 background_color[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+  pipeline.device_context->ClearRenderTargetView(pipeline.rtv, background_color);
+
+  pipeline.device_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+  pipeline.device_context->VSSetShader(pipeline.vs, null, 0);
+  pipeline.device_context->PSSetShader(pipeline.ps, null, 0);
+  pipeline.device_context->PSSetShaderResources(0, 1, &render_buffer.texture_srv);
+
+  pipeline.device_context->RSSetViewports(1, &pipeline.viewport);
+  pipeline.device_context->OMSetRenderTargets(1, &pipeline.rtv, null);
+  pipeline.device_context->OMSetBlendState(pipeline.blend_state, null, 0xffffffff);
+
+  pipeline.device_context->Draw(4, 0);
+
+  pipeline.swap_chain->Present(1, 0);
 }
