@@ -16,9 +16,107 @@ s64 get_os_timer()
   return result.QuadPart;
 }
 
-bool os_is_key_pressed(s32 key)
+enum Key : u8
+{
+  KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G,
+  KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N,
+  KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U,
+  KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+  KEY_0, KEY_1, KEY_2, KEY_3, KEY_4,
+  KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+  KEY_SPACE, KEY_ENTER, KEY_ESCAPE, KEY_BACKSPACE, KEY_TAB,
+  KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
+  KEY_SHIFT, KEY_CTRL, KEY_ALT,
+  KEY_F1, KEY_F2, KEY_F3, KEY_F4,  KEY_F5,  KEY_F6,
+  KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+};
+
+s32 internal_convert_key_to_os_key(Key key)
+{
+  switch(key)
+  {
+    case KEY_A: return 'A';
+    case KEY_B: return 'B';
+    case KEY_C: return 'C';
+    case KEY_D: return 'D';
+    case KEY_E: return 'E';
+    case KEY_F: return 'F';
+    case KEY_G: return 'G';
+    case KEY_H: return 'H';
+    case KEY_I: return 'I';
+    case KEY_J: return 'J';
+    case KEY_K: return 'K';
+    case KEY_L: return 'L';
+    case KEY_M: return 'M';
+    case KEY_N: return 'N';
+    case KEY_O: return 'O';
+    case KEY_P: return 'P';
+    case KEY_Q: return 'Q';
+    case KEY_R: return 'R';
+    case KEY_S: return 'S';
+    case KEY_T: return 'T';
+    case KEY_U: return 'U';
+    case KEY_V: return 'V';
+    case KEY_W: return 'W';
+    case KEY_X: return 'X';
+    case KEY_Y: return 'Y';
+    case KEY_Z: return 'Z';
+    case KEY_0: return '0';
+    case KEY_1: return '1';
+    case KEY_2: return '2';
+    case KEY_3: return '3';
+    case KEY_4: return '4';
+    case KEY_5: return '5';
+    case KEY_6: return '6';
+    case KEY_7: return '7';
+    case KEY_8: return '8';
+    case KEY_9: return '9';
+    case KEY_SPACE:     return VK_SPACE;
+    case KEY_ENTER:     return VK_RETURN;
+    case KEY_ESCAPE:    return VK_ESCAPE;
+    case KEY_BACKSPACE: return VK_BACK;
+    case KEY_TAB:       return VK_TAB;
+    case KEY_LEFT:      return VK_LEFT;
+    case KEY_RIGHT:     return VK_RIGHT;
+    case KEY_UP:        return VK_UP;
+    case KEY_DOWN:      return VK_DOWN;
+    case KEY_SHIFT:     return VK_SHIFT;
+    case KEY_CTRL:      return VK_CONTROL;
+    case KEY_ALT:       return VK_MENU;
+    case KEY_F1:        return VK_F1;
+    case KEY_F2:        return VK_F2;
+    case KEY_F3:        return VK_F3;
+    case KEY_F4:        return VK_F4;
+    case KEY_F5:        return VK_F5;
+    case KEY_F6:        return VK_F6;
+    case KEY_F7:        return VK_F7;
+    case KEY_F8:        return VK_F8;
+    case KEY_F9:        return VK_F9;
+    case KEY_F10:       return VK_F10;
+    case KEY_F11:       return VK_F11;
+    case KEY_F12:       return VK_F12;
+  }
+  return -1;
+}
+
+bool internal_os_is_key_pressed(s32 key)
 {
   return GetAsyncKeyState(key) & 0x01;
+}
+
+bool internal_os_is_key_down(s32 key)
+{
+  return GetAsyncKeyState(key) & 0x8000;
+}
+
+bool is_key_pressed(Key key)
+{
+  return internal_os_is_key_pressed(internal_convert_key_to_os_key(key));
+}
+
+bool is_key_down(Key key)
+{
+  return internal_os_is_key_down(internal_convert_key_to_os_key(key));
 }
 
 struct Window
@@ -26,23 +124,25 @@ struct Window
   HWND handle;
 };
 
-void window_message_handler(bool *running)
+enum WindowMessageType : u8
 {
-  MSG msg;
-  while(PeekMessage(&msg, null, 0, 0, PM_REMOVE))
-  {
-    switch(msg.message)
-    {
-      case WM_QUIT:
-      {
-        *running = false;
-      }
-      break;
-    }
+  MSG_NONE,
+  MSG_QUIT,
+};
 
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
-  }
+bool poll_window_message(WindowMessageType *window_message_type)
+{
+  *window_message_type = MSG_NONE;
+
+  MSG msg;
+  if(!PeekMessage(&msg, null, 0, 0, PM_REMOVE)) return false;
+
+  TranslateMessage(&msg);
+  DispatchMessage(&msg);
+
+  if(msg.message == WM_QUIT) *window_message_type = MSG_QUIT;
+
+  return true;
 }
 
 LRESULT window_proc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param)
@@ -172,9 +272,9 @@ Pipeline init_gfx(Window window)
     VS_Output vs_main(uint id : SV_VertexID)
     {
       VS_Output output;
-      Vertex vertex     = vertices[id];
-      output.position   = float4(vertex.position, 0.0f, 1.0f);
-      output.uv         = vertex.uv;
+      Vertex vertex   = vertices[id];
+      output.position = float4(vertex.position, 0.0f, 1.0f);
+      output.uv       = vertex.uv;
       return output;
     }
 
@@ -263,7 +363,7 @@ void clear_buffer(RenderBuffer *buffer)
   }
 }
 
-void present_frame(Pipeline pipeline, RenderBuffer *buffer)
+void draw_frame(Pipeline pipeline, RenderBuffer *buffer)
 {
   D3D11_MAPPED_SUBRESOURCE mapped_resource;
   pipeline.device_context->Map(buffer->texture_2d, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource);
@@ -279,7 +379,7 @@ void present_frame(Pipeline pipeline, RenderBuffer *buffer)
   pipeline.device_context->Unmap(buffer->texture_2d, 0);
 }
 
-void render_frame(Pipeline pipeline, RenderBuffer render_buffer)
+void present_frame(Pipeline pipeline, RenderBuffer render_buffer)
 {
   f32 background_color[4] = {1.0f, 0.0f, 1.0f, 1.0f};
   pipeline.device_context->ClearRenderTargetView(pipeline.rtv, background_color);

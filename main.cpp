@@ -136,10 +136,8 @@ void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 colo
     f32 f = frac(intery);
     f32 fi = floorf(intery);
 
-    f32 a0 = (f32)x;
-    f32 a1 = fi;
-    f32 b0 = (f32)x;
-    f32 b1 = fi + 1;
+    f32 a0 = (f32)x, a1 = fi;
+    f32 b0 = (f32)x, b1 = fi + 1;
 
     if(steep)
     {
@@ -182,6 +180,21 @@ bool inside_triangle(V3 p, V3 a, V3 b, V3 c)
   return false;
 }
 
+// bool inside_triangle(V3 p, V3 a, V3 b, V3 c)
+// {
+//   V3 weights = {};
+//   weights.x = cross(b-a, p-a).z;
+//   weights.y = cross(c-b, p-b).z;
+//   weights.z = cross(a-c, p-c).z;
+
+//   if(weights.x >= 0 && weights.y >= 0 && weights.z >= 0)
+//   {
+//     return true;
+//   }
+
+//   return false;
+// }
+
 struct Vertex
 {
   V3 position;
@@ -215,10 +228,28 @@ void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
 
       if(w0 >= 0 && w1 >= 0 && w2 >= 0)
       {
-        buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = color;
+        draw_pixel(buffer, x, y, color);
+        // buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = color;
       }
     }
   }
+}
+
+// https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-rasterizer-stage-rules
+// A top edge, is an edge that is exactly horizontal and is above the other edges.
+// A bottom edge, is an edge that is exactly horizontal and is below the other edges.
+// A left edge, is an edge that is not exactly horizontal and is on the left side of the triangle. A triangle can have one or two left edges.
+// A right edge, is an edge that is not exactly horizontal and is on the right side of the triangle. A triangle can have one or two right edges.
+
+bool is_top_or_left_edge(V3 a, V3 b)
+{
+  V3 c = a - b;
+  // TOP
+  if(c.y == 0 && c.x > 0) return true;
+  // LEFT
+  if(c.y < 0) true;
+
+  return false;
 }
 
 void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc)
@@ -252,39 +283,118 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc)
       f32 w0 = cross(cb, pb).z; // Opposite of A
       f32 w1 = cross(ac, pc).z; // Opposite of B
       f32 w2 = cross(ba, pa).z; // Opposite of C
-
+      
       if(w0 >= 0 && w1 >= 0 && w2 >= 0)
       {
+        // bool f0 = is_top_or_left_edge(c, b);
+        // bool f1 = is_top_or_left_edge(a, c);
+        // bool f2 = is_top_or_left_edge(b, a);
+        // if(w0 == 0)
+
         f32 area = w0 + w1 + w2;
 
         V4 blend_color = color_a * (w0 / area) + color_b * (w1 / area) + color_c * (w2 / area);
-        buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = u32_from_v4(blend_color);
+        draw_pixel(buffer, x, y, u32_from_v4(blend_color));
+        // buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = u32_from_v4(blend_color);
       }
     }
   }
 }
 
+struct Triangle { V3 a, b, c; };
+
+Triangle project(Triangle t, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
+{
+  V4 cta = (V4_from(t.a, 1) * model_to_view * view_to_projection);
+  V4 ctb = (V4_from(t.b, 1) * model_to_view * view_to_projection);
+  V4 ctc = (V4_from(t.c, 1) * model_to_view * view_to_projection);
+  V3 ndc_ta = cta.rgb / cta.w;
+  V3 ndc_tb = ctb.rgb / ctb.w;
+  V3 ndc_tc = ctc.rgb / ctc.w;
+  V3 ta = ndc_to_screen(ndc_ta, window_width, window_height);
+  V3 tb = ndc_to_screen(ndc_tb, window_width, window_height);
+  V3 tc = ndc_to_screen(ndc_tc, window_width, window_height);
+  return {ta, tb, tc};
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
-  u32 window_width  = 2560;
-  u32 window_height = 1080;
+  // u32 window_width  = 2560;
+  // u32 window_height = 1080;
   // u32 window_width  = 1280;
   // u32 window_height = 720;
-  // u32 window_width  = 50;
-  // u32 window_height = 50;
+  u32 window_width  = 50;
+  u32 window_height = 50;
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
   // RenderBuffer render_buffer = create_main_buffer(pipeline, window_width, window_height);
   RenderBuffer render_buffer = create_main_buffer(pipeline, window_width, window_height);
 
+  CameraActions camera_actions = {};
+  Camera camera = {};
+  camera.position = {-1.0f, 0, 0};
+  f32 fov_y  = 0.25f / 2.0f;
+  f32 z_near = 0.01f;
+  f32 aspect_ratio = (f32)window_width / (f32)window_height;
+
+  // Triangle t = {{0,0,0}, {150, 0, 0}, {150, 150, 0}};
+  Triangle t =
+  {
+    {0.93f,  0.0f, 0.0f},
+    {0.63f, -0.2f, 0.3f},
+    {-0.33f,  0.2f, 0.3f},
+  };
+
+  Triangle top =
+  {
+    {0.9f, -0.8f,  1.0f},
+    {0.9f, -0.8f, -1.0f},
+    {0.9f,  0.8f,  1.0f},
+  };
+
+  Triangle bottom =
+  {
+    {0.9f, -0.8f, -1.0f},
+    {0.9f,  0.8f, -1.0f},
+    {0.9f,  0.8f,  1.0f},
+  };
+
   for(bool running = true; running;)
   {
-    window_message_handler(&running);
+    WindowMessageType window_message_type;
+    while(poll_window_message(&window_message_type))
+    {
+      switch(window_message_type)
+      {
+        case MSG_NONE: break;
+        case MSG_QUIT:
+          running = false;
+        break;
+      }
+    }
 
-    if(os_is_key_pressed(VK_ESCAPE)) // TODO: Windows key is leaking.
+    if(is_key_pressed(KEY_ESCAPE))
     {
       running = false;
     }
+
+    camera_actions.is_pressing_forward  = is_key_down(KEY_W);
+    camera_actions.is_pressing_backward = is_key_down(KEY_S);
+    camera_actions.is_pressing_left     = is_key_down(KEY_A);
+    camera_actions.is_pressing_right    = is_key_down(KEY_D);
+    camera_actions.is_pressing_up       = is_key_down(KEY_Q);
+    camera_actions.is_pressing_down     = is_key_down(KEY_E);
+
+    camera_actions.is_looking_left  = is_key_down(KEY_J);
+    camera_actions.is_looking_right = is_key_down(KEY_L);
+    camera_actions.is_looking_up    = is_key_down(KEY_I);
+    camera_actions.is_looking_down  = is_key_down(KEY_K);
+
+    f32 FIXED_DT = 1.0f / 60.0f;
+    update_camera(camera_actions, &camera, FIXED_DT);
+
+    Matrix model_to_view = create_view_matrix(camera.position, camera.target);
+    Matrix view_to_projection = create_perspective_projection_matrix(aspect_ratio, fov_y, z_near);
 
     clear_buffer(&render_buffer);
 
@@ -309,19 +419,31 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     // draw_line(&render_buffer,  0, 0, 1, 0.5f, 0xffffffff);
     // draw_line(&render_buffer, 30, 30, 60, 10, 0xffffffff);
     // draw_line(&render_buffer, 0, 0, (f32)window_width, (f32)window_height, 0xffffffff);
-    draw_line(&render_buffer, 0, 0, (f32)window_width, (f32)window_height, 0xffffff77);
-    draw_line_aa(&render_buffer, 0, (f32)window_height, (f32)window_width, 0, 0xffffffff);
+    // draw_line(&render_buffer, 0, 0, (f32)window_width, (f32)window_height, 0xffffff77);
+    // draw_line_aa(&render_buffer, 0, (f32)window_height, (f32)window_width, 0, 0xffffffff);
 
-    draw_triangle(&render_buffer, {0,0,0}, {50, 0, 0}, {50, 50, 0}, 0x550000ff);
+    // draw_triangle(&render_buffer, {0,0,0}, {50, 0, 0}, {50, 50, 0}, 0x550000ff);
+    V4 cta = (V4_from(t.a, 1) * model_to_view * view_to_projection);
+    V4 ctb = (V4_from(t.b, 1) * model_to_view * view_to_projection);
+    V4 ctc = (V4_from(t.c, 1) * model_to_view * view_to_projection);
+    V3 ndc_ta = cta.rgb / cta.w;
+    V3 ndc_tb = ctb.rgb / ctb.w;
+    V3 ndc_tc = ctc.rgb / ctc.w;
+    V3 ta = ndc_to_screen(ndc_ta, window_width, window_height);
+    V3 tb = ndc_to_screen(ndc_tb, window_width, window_height);
+    V3 tc = ndc_to_screen(ndc_tc, window_width, window_height);
 
-    Vertex va = {{200,   0,   0}, {1,0,0,1}};
-    Vertex vb = {{800,   0,   0}, {0,1,0,1}};
-    Vertex vc = {{500, 400,   0}, {0,0,1,1}};
-    draw_triangle(&render_buffer, va, vb, vc);
-    
-    present_frame(pipeline, &render_buffer);
+    // draw_triangle(&render_buffer, t.a, t.b, t.c, 0x550000ff);
+    // draw_triangle(&render_buffer, ta, tb, tc, 0x550000ff);
 
-    render_frame(pipeline, render_buffer);
+    Triangle ptop    = project(top, model_to_view, view_to_projection, window_width, window_height);
+    Triangle pbottom = project(bottom, model_to_view, view_to_projection, window_width, window_height);
+    draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x55550055);
+    draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
+
+    draw_frame(pipeline, &render_buffer);
+
+    present_frame(pipeline, render_buffer);
   }
 
   return 0;
