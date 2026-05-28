@@ -323,8 +323,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   // u32 window_height = 1080;
   // u32 window_width  = 1280;
   // u32 window_height = 720;
-  u32 window_width  = 50;
-  u32 window_height = 50;
+  // u32 window_width  = 1024;
+  // u32 window_height = 768;
+  // u32 window_width  = 800;
+  // u32 window_height = 600;
+  u32 window_width  = 640;
+  u32 window_height = 480;
+  // u32 window_width  = 50;
+  // u32 window_height = 50;
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
   // RenderBuffer render_buffer = create_main_buffer(pipeline, window_width, window_height);
@@ -359,6 +365,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     {0.9f,  0.8f,  1.0f},
   };
 
+  bool hide_triangle = false;
+  bool hide_triangle1 = false;
+
   for(bool running = true; running;)
   {
     WindowMessageType window_message_type;
@@ -372,6 +381,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         break;
       }
     }
+
+    if(is_key_pressed(KEY_G)) hide_triangle = !hide_triangle;
+    if(is_key_pressed(KEY_H)) hide_triangle1 = !hide_triangle1;
 
     if(is_key_pressed(KEY_ESCAPE))
     {
@@ -438,8 +450,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
     Triangle ptop    = project(top, model_to_view, view_to_projection, window_width, window_height);
     Triangle pbottom = project(bottom, model_to_view, view_to_projection, window_width, window_height);
-    draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x55550055);
-    draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
+    if(!hide_triangle)
+    {
+      draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x555500ff);
+    }
+    if(!hide_triangle1)
+    {
+      draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
+    }
 
     draw_frame(pipeline, &render_buffer);
 
