@@ -208,6 +208,7 @@ struct Pipeline
   ID3D11VertexShader *vs;
   ID3D11PixelShader *ps;
   ID3D11BlendState *blend_state;
+  ID3D11SamplerState *point_sampler;
 };
 
 Pipeline init_gfx(Window window)
@@ -308,6 +309,13 @@ Pipeline init_gfx(Window window)
   desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
   pipeline.device->CreateBlendState(&desc, &pipeline.blend_state);
 
+  D3D11_SAMPLER_DESC sampler_desc = {};
+  sampler_desc.Filter   = D3D11_FILTER_MIN_MAG_MIP_POINT;
+  sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+  sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+  sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+  pipeline.device->CreateSamplerState(&sampler_desc, &pipeline.point_sampler);
+
   return pipeline;
 }
 
@@ -393,6 +401,9 @@ void present_frame(Pipeline pipeline, RenderBuffer render_buffer)
   pipeline.device_context->RSSetViewports(1, &pipeline.viewport);
   pipeline.device_context->OMSetRenderTargets(1, &pipeline.rtv, null);
   pipeline.device_context->OMSetBlendState(pipeline.blend_state, null, 0xffffffff);
+
+  // TODO: Added point sampler to test triangle overdraw
+  pipeline.device_context->PSSetSamplers(0, 1, &pipeline.point_sampler);
 
   pipeline.device_context->Draw(4, 0);
 

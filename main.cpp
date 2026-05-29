@@ -243,11 +243,11 @@ void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
 
 bool is_top_or_left_edge(V3 a, V3 b)
 {
-  V3 c = a - b;
+  V3 c = b - a;
   // TOP
   if(c.y == 0 && c.x > 0) return true;
   // LEFT
-  if(c.y < 0) true;
+  if(c.y < 0) return true;
 
   return false;
 }
@@ -280,23 +280,41 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc)
       V3 cb = c - b;
       V3 ac = a - c;
 
-      f32 w0 = cross(cb, pb).z; // Opposite of A
-      f32 w1 = cross(ac, pc).z; // Opposite of B
-      f32 w2 = cross(ba, pa).z; // Opposite of C
+      f32 w0 = cross(pb, cb).z; // Opposite of A
+      f32 w1 = cross(pc, ac).z; // Opposite of B
+      f32 w2 = cross(pa, ba).z; // Opposite of C
       
-      if(w0 >= 0 && w1 >= 0 && w2 >= 0)
+      bool is_cb_top_left = is_top_or_left_edge(c, b);
+      bool is_ac_top_left = is_top_or_left_edge(a, c);
+      bool is_ba_top_left = is_top_or_left_edge(b, a);
+
+      bool passed_edge_a = w0 < 0 || (w0 == 0 && is_cb_top_left);
+      bool passed_edge_b = w1 < 0 || (w1 == 0 && is_ac_top_left);
+      bool passed_edge_c = w2 < 0 || (w2 == 0 && is_ba_top_left);
+
+      // TODO: Hollow triangle
+      #if 0
+      f32 area = w0 + w1 + w2;
+      bool passed_edge_a = (w0 / area) < 0.05f || (w0 == 0 && is_cb_top_left);
+      bool passed_edge_b = (w1 / area) < 0.05f || (w1 == 0 && is_ac_top_left);
+      bool passed_edge_c = (w2 / area) < 0.05f || (w2 == 0 && is_ba_top_left);
+      #endif
+ 
+      // TODO: Show overdraw
+      #if 0
+      bool passed_edge_a = w0 <= 0;
+      bool passed_edge_b = w1 <= 0;
+      bool passed_edge_c = w2 <= 0;
+      #endif
+
+      if(passed_edge_a && passed_edge_b && passed_edge_c)
       {
-        // bool f0 = is_top_or_left_edge(c, b);
-        // bool f1 = is_top_or_left_edge(a, c);
-        // bool f2 = is_top_or_left_edge(b, a);
-        // if(w0 == 0)
-
         f32 area = w0 + w1 + w2;
-
         V4 blend_color = color_a * (w0 / area) + color_b * (w1 / area) + color_c * (w2 / area);
         draw_pixel(buffer, x, y, u32_from_v4(blend_color));
         // buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = u32_from_v4(blend_color);
       }
+      // else draw_pixel(buffer, x, y, (0x000000ff));
     }
   }
 }
@@ -333,8 +351,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   // u32 window_height = 50;
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
-  // RenderBuffer render_buffer = create_main_buffer(pipeline, window_width, window_height);
-  RenderBuffer render_buffer = create_main_buffer(pipeline, window_width, window_height);
+  u32 render_scale = 4;
+  RenderBuffer render_buffer = create_main_buffer(pipeline, window_width / render_scale, window_height / render_scale);
 
   CameraActions camera_actions = {};
   Camera camera = {};
@@ -441,22 +459,30 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     V3 ndc_ta = cta.rgb / cta.w;
     V3 ndc_tb = ctb.rgb / ctb.w;
     V3 ndc_tc = ctc.rgb / ctc.w;
-    V3 ta = ndc_to_screen(ndc_ta, window_width, window_height);
-    V3 tb = ndc_to_screen(ndc_tb, window_width, window_height);
-    V3 tc = ndc_to_screen(ndc_tc, window_width, window_height);
+    V3 ta = ndc_to_screen(ndc_ta, render_buffer.width, render_buffer.height);
+    V3 tb = ndc_to_screen(ndc_tb, render_buffer.width, render_buffer.height);
+    V3 tc = ndc_to_screen(ndc_tc, render_buffer.width, render_buffer.height);
 
     // draw_triangle(&render_buffer, t.a, t.b, t.c, 0x550000ff);
     // draw_triangle(&render_buffer, ta, tb, tc, 0x550000ff);
 
-    Triangle ptop    = project(top, model_to_view, view_to_projection, window_width, window_height);
-    Triangle pbottom = project(bottom, model_to_view, view_to_projection, window_width, window_height);
+    Triangle ptop    = project(top, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    Triangle pbottom = project(bottom, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
     if(!hide_triangle)
     {
-      draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x555500ff);
+      Vertex a = {ptop.a, {1,0,0,1}};
+      Vertex b = {ptop.b, {0,1,0,1}};
+      Vertex c = {ptop.c, {0,0,1,1}};
+      // draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x555500ff);
+      draw_triangle(&render_buffer, a, b, c);
     }
     if(!hide_triangle1)
     {
-      draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
+      Vertex a = {pbottom.a, {1,0,0,1}};
+      Vertex b = {pbottom.b, {0,1,0,1}};
+      Vertex c = {pbottom.c, {0,0,1,1}};
+      // draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
+      draw_triangle(&render_buffer, a, b, c);
     }
 
     draw_frame(pipeline, &render_buffer);
