@@ -5,6 +5,53 @@
 #include "src/base_types.cpp"
 #include "src/dx11.cpp"
 #include "src/math.cpp"
+#include "src/font.cpp"
+
+
+struct Time
+{
+  s64 begin;
+  s64 frequency;
+};
+
+Time init_time()
+{
+  Time time = {};
+  time.begin     = get_os_timer();
+  time.frequency = get_os_timer_frequency();
+  return time;
+}
+
+f32 calculate_dt(Time *time)
+{
+  s64 end_time = get_os_timer();
+  f32 dt = (f32)((f64)(end_time - time->begin) / (f64)time->frequency);
+  time->begin = end_time;
+
+  return dt;
+}
+
+struct Frame
+{
+  s32 counter;
+  f32 rate_timer;
+  f64 time;
+  f32 rate;
+};
+
+void frame_tick(Frame *frame, f32 dt)
+{
+  frame->time += dt;
+  frame->rate_timer += dt;
+  frame->counter++;
+
+  if(frame->rate_timer >= 1)
+  {
+    frame->rate = (f32)frame->counter / frame->rate_timer;
+    frame->counter = 0;
+    frame->rate_timer = 0;
+  }
+}
 
 void draw_pixel(RenderBuffer *buffer, f32 x, f32 y, u32 color)
 {
@@ -335,6 +382,29 @@ Triangle project(Triangle t, Matrix model_to_view, Matrix view_to_projection, u3
   return {ta, tb, tc};
 }
 
+void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
+{
+  u32 cursor_x = x;
+  while(*text)
+  {
+    u8 c = *text;
+    for(u32 row = 0; row < 8; row++)
+    {
+      for(u32 col = 0; col < 8; col++)
+      {
+        s32 should_paint = font[c][row] & (1 << col);
+        if(should_paint)
+        {
+          draw_pixel_alpha(render_buffer, (f32)(cursor_x + col), (f32)(y + row), 0xffffffff, 1);
+        }
+      }
+    }
+
+    text++;
+    cursor_x += 8;
+  }
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
   // u32 window_width  = 2560;
@@ -383,11 +453,65 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     {0.9f,  0.8f,  1.0f},
   };
 
+  // Cube at x:[0.3,0.9] y:[-0.4,0.4] z:[-0.4,0.4]
+  V3 v0 = {0.3f, -0.4f, -0.4f};
+  V3 v1 = {0.9f, -0.4f, -0.4f};
+  V3 v2 = {0.9f,  0.4f, -0.4f};
+  V3 v3 = {0.3f,  0.4f, -0.4f};
+  V3 v4 = {0.3f, -0.4f,  0.4f};
+  V3 v5 = {0.9f, -0.4f,  0.4f};
+  V3 v6 = {0.9f,  0.4f,  0.4f};
+  V3 v7 = {0.3f,  0.4f,  0.4f};
+
+  // Triangle cube[12] =
+  // {
+  //   {v0, v4, v7}, {v0, v7, v3}, // near   (x=0.3)
+  //   {v1, v2, v6}, {v1, v6, v5}, // far    (x=0.9)
+  //   {v0, v1, v5}, {v0, v5, v4}, // bottom (y=-0.4)
+  //   {v3, v7, v6}, {v3, v6, v2}, // top    (y=+0.4)
+  //   {v0, v3, v2}, {v0, v2, v1}, // back   (z=-0.4)
+  //   {v4, v5, v6}, {v4, v6, v7}, // front  (z=+0.4)
+  // };
+
+  Triangle cube[12] =
+  {
+    {v0, v7, v4}, {v0, v3, v7}, // near   (x=0.3)
+    {v1, v6, v2}, {v1, v5, v6}, // far    (x=0.9)
+    {v0, v5, v1}, {v0, v4, v5}, // bottom (y=-0.4)
+    {v3, v6, v7}, {v3, v2, v6}, // top    (y=+0.4)
+    {v0, v2, v3}, {v0, v1, v2}, // back   (z=-0.4)
+    {v4, v6, v5}, {v4, v7, v6}, // front  (z=+0.4)
+  };
+
+  V4 face_colors[6] =
+  {
+    {1,0,0,1}, // near   - red
+    {0,1,0,1}, // far    - green
+    {0,0,1,1}, // bottom - blue
+    {1,1,0,1}, // top    - yellow
+    {1,0,1,1}, // back   - magenta
+    {0,1,1,1}, // front  - cyan
+  };
+
   bool hide_triangle = false;
   bool hide_triangle1 = false;
 
+  s64 cpu_frequency = get_os_timer_frequency();
+  char fps_text[32];
+
+  // u32 frame_counter = 0;
+  // f32 fps = 0;
+  // f32 rate_timer = 0;
+  // s64 begin_frame_time = 0;
+
+  Time time = init_time();
+  Frame frame = {};
+
   for(bool running = true; running;)
   {
+    f32 dt = calculate_dt(&time);
+    frame_tick(&frame, dt);
+
     WindowMessageType window_message_type;
     while(poll_window_message(&window_message_type))
     {
@@ -484,6 +608,30 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
       // draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
       draw_triangle(&render_buffer, a, b, c);
     }
+
+    ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
+    {      
+      for(u32 i = 0; i < 12; i++)
+      {
+        Triangle pt = project(cube[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+        V4 color = face_colors[i / 2];
+        Vertex a = {pt.a, color};
+        Vertex b = {pt.b, color};
+        Vertex c = {pt.c, color};
+        draw_triangle(&render_buffer, a, b, c);
+      }      
+    }
+    end_profile(cube_profile);
+
+    // snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", frame.rate);
+    snprintf(fps_text, sizeof(fps_text), "FPS: %.4f", 1/frame.rate);
+    // snprintf(fps_text, sizeof(fps_text), "Douglas: %.4f", 1.0);
+    // snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", frame.rate_timer);
+    draw_text(&render_buffer, 4, 3, fps_text);
+    // draw_text(&render_buffer, 4, 3, "FPS");
+    
+    snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
+    draw_text(&render_buffer, 4, 13, fps_text);
 
     draw_frame(pipeline, &render_buffer);
 

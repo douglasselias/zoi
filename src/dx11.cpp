@@ -16,6 +16,41 @@ s64 get_os_timer()
   return result.QuadPart;
 }
 
+s64 get_os_timer_frequency()
+{
+  LARGE_INTEGER result;
+  QueryPerformanceFrequency(&result);
+  return result.QuadPart;
+}
+
+struct ProfileBlock
+{
+  char *name;
+  s64 frequency;
+  s64 begin_time;
+  f64 elapsed;
+};
+
+ProfileBlock profile_blocks[100] = {};
+u32 profile_block_index = 0;
+
+ProfileBlock* begin_profile(char *name, s64 frequency)
+{
+  u32 i = profile_block_index;
+  profile_block_index = (profile_block_index + 1) % 100;
+  ProfileBlock *block = &profile_blocks[i];
+  block->name = name;
+  block->begin_time = get_os_timer();
+  block->frequency = frequency;
+  return block;
+}
+
+void end_profile(ProfileBlock *block)
+{
+  // block->elapsed = (get_os_timer() - block->begin_time) / (f64)block->frequency * 1000.0;
+  block->elapsed = (get_os_timer() - block->begin_time) / (f64)block->frequency;
+}
+
 enum Key : u8
 {
   KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G,
