@@ -246,7 +246,49 @@ struct Vertex
 {
   V3 position;
   V4 color;
+  V2 uv;
+  f32 w;
 };
+
+struct Texture
+{
+  u32 width, height;
+  u32 *pixels;
+};
+
+struct Mesh
+{
+  Vertex *vertices;
+  u32 vertices_count;
+  Texture texture;
+};
+
+Texture create_checkboard_texture(u32 width, u32 height)
+{
+  Texture texture = {};
+  texture.width  = width;
+  texture.height = height;
+  texture.pixels = (u32*)malloc(texture.width * texture.height * sizeof(u32));
+
+  for(u32 y = 0; y < texture.height; y++)
+  {
+    for(u32 x = 0; x < texture.width; x++)
+    {
+      // u32 tile_size = 4;
+      u32 tile_size = 1;
+      if(((x / tile_size) + (y / tile_size)) % 2 == 0)
+      {
+        texture.pixels[x + y * texture.width] = 0xffffffff;
+      }
+      else
+      {
+        texture.pixels[x + y * texture.width] = 0x000000ff;
+      }
+    }
+  }
+
+  return texture;
+}
 
 void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
 {
@@ -299,7 +341,7 @@ bool is_top_or_left_edge(V3 a, V3 b)
   return false;
 }
 
-void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc)
+void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {})
 {
   V3 a = va.position;
   V3 b = vb.position;
@@ -357,16 +399,51 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc)
       if(passed_edge_a && passed_edge_b && passed_edge_c)
       {
         f32 area = w0 + w1 + w2;
-        V4 blend_color = color_a * (w0 / area) + color_b * (w1 / area) + color_c * (w2 / area);
+        f32 weight_a = (w0 / area);
+        f32 weight_b = (w1 / area);
+        f32 weight_c = (w2 / area);
+
+        V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
+
+        if(texture.width > 0 && texture.height > 0)
+        {
+          V2 uva = (va.uv / va.w) * weight_a;
+          V2 uvb = (vb.uv / vb.w) * weight_b;
+          V2 uvc = (vc.uv / vc.w) * weight_c;
+          
+          f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
+          V2 sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
+
+          u32 sample = texture.pixels[(u32)sample_uv.x + (u32)sample_uv.y * texture.width];
+          blend_color = v4_from_u32(sample);
+        }
+
         draw_pixel(buffer, x, y, u32_from_v4(blend_color));
-        // buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = u32_from_v4(blend_color);
       }
       // else draw_pixel(buffer, x, y, (0x000000ff));
     }
   }
 }
 
-struct Triangle { V3 a, b, c; };
+union Triangle
+{
+  struct { V3 a, b, c; };
+  V3 vertices[3];
+};
+
+Vertex project(Vertex v, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
+{
+  Vertex result = {};
+  memcpy(&result, &v, sizeof(Vertex));
+
+  V4 projected_position = (V4_from(v.position, 1) * model_to_view * view_to_projection);
+  V3 normalized_position = projected_position.rgb / projected_position.w;
+  V3 screen_position = ndc_to_screen(normalized_position, window_width, window_height);
+
+  result.position = screen_position;
+  result.w = projected_position.w;
+  return result;
+}
 
 Triangle project(Triangle t, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
 {
@@ -405,6 +482,18 @@ void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
   }
 }
 
+void draw_mesh(RenderBuffer *render_buffer, Mesh mesh)
+{
+  u32 total_triangles = mesh.vertices_count / 3;
+  for(u32 i = 0; i < total_triangles; i++)
+  {
+    Vertex va = mesh.vertices[(i * 3) + 0];
+    Vertex vb = mesh.vertices[(i * 3) + 1];
+    Vertex vc = mesh.vertices[(i * 3) + 2];
+    draw_triangle(render_buffer, va, vb, vc, mesh.texture);
+  }
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
   // u32 window_width  = 2560;
@@ -431,27 +520,60 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   f32 z_near = 0.01f;
   f32 aspect_ratio = (f32)window_width / (f32)window_height;
 
+  Texture checkerboard_texture = create_checkboard_texture(30, 30);
+
   // Triangle t = {{0,0,0}, {150, 0, 0}, {150, 150, 0}};
-  Triangle t =
+  Triangle t = {};
+  t.vertices[0] = { 0.93f,  0.0f, 0.0f};
+  t.vertices[1] = { 0.63f, -0.2f, 0.3f};
+  t.vertices[2] = {-0.33f,  0.2f, 0.3f};
+
+  Triangle top = {};
+  top.vertices[0] = {0.9f, -0.8f,  1.0f};
+  top.vertices[1] = {0.9f, -0.8f, -1.0f};
+  top.vertices[2] = {0.9f,  0.8f,  1.0f};
+
+  Triangle bottom = {};
+  bottom.vertices[0] = {0.9f, -0.8f, -1.0f};
+  bottom.vertices[1] = {0.9f,  0.8f, -1.0f};
+  bottom.vertices[2] = {0.9f,  0.8f,  1.0f};
+
+  V2 uvs[6] =
   {
-    {0.93f,  0.0f, 0.0f},
-    {0.63f, -0.2f, 0.3f},
-    {-0.33f,  0.2f, 0.3f},
+    {0,1},
+    {0,0},
+    {1,1},
+    {1,1},
+    {1,0},
+    {0,0},
   };
 
-  Triangle top =
+  Mesh quad = {};
+  quad.texture = checkerboard_texture;
+  quad.vertices_count = 6;
+  quad.vertices = (Vertex*)malloc(quad.vertices_count * sizeof(Vertex));
+  for(u32 i = 0; i < quad.vertices_count; i++)
   {
-    {0.9f, -0.8f,  1.0f},
-    {0.9f, -0.8f, -1.0f},
-    {0.9f,  0.8f,  1.0f},
-  };
+    V3 position = {};
+    V2 uv = uvs[i];
+    if(i < 3)
+    {
+      position = top.vertices[i];
+    }
+    else
+    {
+      position = bottom.vertices[i-3];
+    }
 
-  Triangle bottom =
-  {
-    {0.9f, -0.8f, -1.0f},
-    {0.9f,  0.8f, -1.0f},
-    {0.9f,  0.8f,  1.0f},
-  };
+    quad.vertices[i].position = position;
+    quad.vertices[i].uv = uv;
+    quad.vertices[i].color = {1, 1, 1, 1}; // TODO: Handle both 255 and 1 range.
+  }
+
+  Mesh projected_quad = {};
+  projected_quad.texture = quad.texture;
+  projected_quad.vertices_count = quad.vertices_count;
+  projected_quad.vertices = (Vertex*)malloc(quad.vertices_count * sizeof(Vertex));
 
   // Cube at x:[0.3,0.9] y:[-0.4,0.4] z:[-0.4,0.4]
   V3 v0 = {0.3f, -0.4f, -0.4f};
@@ -598,7 +720,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
       Vertex b = {ptop.b, {0,1,0,1}};
       Vertex c = {ptop.c, {0,0,1,1}};
       // draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x555500ff);
-      draw_triangle(&render_buffer, a, b, c);
+      // draw_triangle(&render_buffer, a, b, c);
     }
     if(!hide_triangle1)
     {
@@ -606,22 +728,30 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
       Vertex b = {pbottom.b, {0,1,0,1}};
       Vertex c = {pbottom.c, {0,0,1,1}};
       // draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
-      draw_triangle(&render_buffer, a, b, c);
+      // draw_triangle(&render_buffer, a, b, c);
     }
 
-    ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
-    {      
-      for(u32 i = 0; i < 12; i++)
-      {
-        Triangle pt = project(cube[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-        V4 color = face_colors[i / 2];
-        Vertex a = {pt.a, color};
-        Vertex b = {pt.b, color};
-        Vertex c = {pt.c, color};
-        draw_triangle(&render_buffer, a, b, c);
-      }      
+
+    for(u32 i = 0; i < quad.vertices_count; i++)
+    {
+      projected_quad.vertices[i] = project(quad.vertices[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
     }
-    end_profile(cube_profile);
+    draw_mesh(&render_buffer, projected_quad);
+    // draw_mesh(&render_buffer, quad);
+
+    // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
+    // {      
+    //   for(u32 i = 0; i < 12; i++)
+    //   {
+    //     Triangle pt = project(cube[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    //     V4 color = face_colors[i / 2];
+    //     Vertex a = {pt.a, color};
+    //     Vertex b = {pt.b, color};
+    //     Vertex c = {pt.c, color};
+    //     draw_triangle(&render_buffer, a, b, c);
+    //   }      
+    // }
+    // end_profile(cube_profile);
 
     // snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", frame.rate);
     snprintf(fps_text, sizeof(fps_text), "FPS: %.4f", 1/frame.rate);
@@ -630,8 +760,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     draw_text(&render_buffer, 4, 3, fps_text);
     // draw_text(&render_buffer, 4, 3, "FPS");
     
-    snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
-    draw_text(&render_buffer, 4, 13, fps_text);
+    // snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
+    // draw_text(&render_buffer, 4, 13, fps_text);
 
     draw_frame(pipeline, &render_buffer);
 

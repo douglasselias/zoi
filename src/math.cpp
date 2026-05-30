@@ -7,6 +7,44 @@ f32 TAU       = 6.28318530717958647692f;
 
 GENERIC T radian_from_turn(T turn) { return turn * (T)TAU; }
 
+struct V2 { f32 x, y; };
+
+V2 operator+(V2 a, V2 b)
+{
+  return
+  {
+    a.x + b.x,
+    a.y + b.y,
+  };
+}
+
+V2 operator*(V2 a, V2 b)
+{
+  return
+  {
+    a.x * b.x,
+    a.y * b.y,
+  };
+}
+
+V2 operator*(V2 a, f32 scalar)
+{
+  return
+  {
+    a.x * scalar,
+    a.y * scalar,
+  };
+}
+
+V2 operator/(V2 a, f32 scalar)
+{
+  return
+  {
+    a.x / scalar,
+    a.y / scalar,
+  };
+}
+
 struct V3 { f32 x, y, z; };
 V3 UP_BASE_AXIS = {0, 0, 1};
 
@@ -156,6 +194,15 @@ V4 normalize(V4 v)
   }
 
   return v;
+}
+
+V4 v4_from_u32(u32 color)
+{
+  f32 r = (f32)((color & 0xff000000) >> 24);
+  f32 g = (f32)((color & 0x00ff0000) >> 16);
+  f32 b = (f32)((color & 0x0000ff00) >>  8);
+  f32 a = (f32)((color & 0x000000ff) >>  0);
+  return {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
 }
 
 u32 u32_from_v4(V4 v)
