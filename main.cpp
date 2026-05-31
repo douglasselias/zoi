@@ -6,52 +6,7 @@
 #include "src/dx11.cpp"
 #include "src/math.cpp"
 #include "src/font.cpp"
-
-
-struct Time
-{
-  s64 begin;
-  s64 frequency;
-};
-
-Time init_time()
-{
-  Time time = {};
-  time.begin     = get_os_timer();
-  time.frequency = get_os_timer_frequency();
-  return time;
-}
-
-f32 calculate_dt(Time *time)
-{
-  s64 end_time = get_os_timer();
-  f32 dt = (f32)((f64)(end_time - time->begin) / (f64)time->frequency);
-  time->begin = end_time;
-
-  return dt;
-}
-
-struct Frame
-{
-  s32 counter;
-  f32 rate_timer;
-  f64 time;
-  f32 rate;
-};
-
-void frame_tick(Frame *frame, f32 dt)
-{
-  frame->time += dt;
-  frame->rate_timer += dt;
-  frame->counter++;
-
-  if(frame->rate_timer >= 1)
-  {
-    frame->rate = (f32)frame->counter / frame->rate_timer;
-    frame->counter = 0;
-    frame->rate_timer = 0;
-  }
-}
+#include "src/timing.cpp"
 
 void draw_pixel(RenderBuffer *buffer, f32 x, f32 y, u32 color)
 {
@@ -106,16 +61,6 @@ void draw_line(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 color)
     y += dy;
     i++;
   }
-}
-
-f32 frac(f32 x) { return x - floorf(x); }
-f32 rfpart(f32 x) { return 1.0f - frac(x); }
-
-void swap(f32 *a, f32 *b)
-{
-  f32 c = *a;
-  *a = *b;
-  *b = c;
 }
 
 void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 color)
@@ -205,43 +150,6 @@ void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 colo
   }
 }
 
-bool inside_triangle(V3 p, V3 a, V3 b, V3 c)
-{
-  V3 pa = p - a;
-  V3 pb = p - b;
-  V3 pc = p - c;
-
-  V3 ba = b - a;
-  V3 cb = c - b;
-  V3 ac = a - c;
-
-  f32 w0 = cross(ba, pa).z;
-  f32 w1 = cross(cb, pb).z;
-  f32 w2 = cross(ac, pc).z;
-
-  if(w0 >= 0 && w1 >= 0 && w2 >= 0)
-  {
-    return true;
-  }
-
-  return false;
-}
-
-// bool inside_triangle(V3 p, V3 a, V3 b, V3 c)
-// {
-//   V3 weights = {};
-//   weights.x = cross(b-a, p-a).z;
-//   weights.y = cross(c-b, p-b).z;
-//   weights.z = cross(a-c, p-c).z;
-
-//   if(weights.x >= 0 && weights.y >= 0 && weights.z >= 0)
-//   {
-//     return true;
-//   }
-
-//   return false;
-// }
-
 struct Vertex
 {
   V3 position;
@@ -261,6 +169,8 @@ struct Texture
   u32 width, height;
   u32 *pixels;
   TextureFilter filter;
+  Texture *mipmaps;
+  u32 mipmaps_count;
 };
 
 struct Mesh
@@ -297,6 +207,48 @@ Texture create_checkboard_texture(u32 width, u32 height)
   return texture;
 }
 
+void generate_mipmaps(Texture *texture)
+{
+  texture->mipmaps_count = (u32)log2f((f32)texture->width);
+  texture->mipmaps = (Texture*)malloc(texture->mipmaps_count * sizeof(Texture));
+
+  for(u32 i = 0; i < texture->mipmaps_count; i++)
+  {
+    Texture *src = (i == 0) ? texture : &texture->mipmaps[i - 1];
+    Texture *mipmap = &texture->mipmaps[i];
+    mipmap->width  = src->width  / 2;
+    mipmap->height = src->height / 2;
+    mipmap->pixels = (u32*)malloc(mipmap->width * mipmap->height * sizeof(u32));
+
+    for(u32 y = 0; y < mipmap->height; y++)
+    {
+      for(u32 x = 0; x < mipmap->width; x++)
+      {
+        u32 u = x;
+        u32 v = y;
+        u32 s = x + 1;
+        u32 t = y + 1;
+
+        u32 sample_a = src->pixels[u + v * src->width];
+        u32 sample_b = src->pixels[s + v * src->width];
+        u32 sample_c = src->pixels[u + t * src->width];
+        u32 sample_d = src->pixels[s + t * src->width];
+        V4 sample0 = v4_from_u32(sample_a);
+        V4 sample1 = v4_from_u32(sample_b);
+        V4 sample2 = v4_from_u32(sample_c);
+        V4 sample3 = v4_from_u32(sample_d);
+        
+        V4 blend0 = blend(sample0, sample1, 0.5f);
+        V4 blend1 = blend(sample2, sample3, 0.5f);
+        V4 blend2 = blend(blend0, blend1, 0.5f);
+
+        u32 color = u32_from_v4(blend2);
+        mipmap->pixels[x + y * mipmap->width] = color;
+      }
+    }
+  }
+}
+
 void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
 {
   f32 min_x = min(min(a.x, b.x), c.x);
@@ -330,12 +282,6 @@ void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
     }
   }
 }
-
-// https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-rasterizer-stage-rules
-// A top edge, is an edge that is exactly horizontal and is above the other edges.
-// A bottom edge, is an edge that is exactly horizontal and is below the other edges.
-// A left edge, is an edge that is not exactly horizontal and is on the left side of the triangle. A triangle can have one or two left edges.
-// A right edge, is an edge that is not exactly horizontal and is on the right side of the triangle. A triangle can have one or two right edges.
 
 bool is_top_or_left_edge(V3 a, V3 b)
 {
@@ -412,7 +358,7 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
 
         V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
 
-        if(texture.width > 0 && texture.height > 0)
+        if(texture.pixels)
         {
           V2 uva = (va.uv / va.w) * weight_a;
           V2 uvb = (vb.uv / vb.w) * weight_b;
@@ -420,11 +366,20 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           
           f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
           V2 sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
-
+          
           f32 uvx0 = sample_uv.x;
           f32 uvy0 = sample_uv.y;
           f32 uvx1 = sample_uv.x + 1;
           f32 uvy1 = sample_uv.y + 1;
+
+          #if 0
+          f32 dx = uvx1 - uvx0;
+          f32 dy = uvy1 - uvy0;
+          u32 mip_level = (u32)log2f(max(dx, dy));
+          texture = texture.mipmaps[mip_level];
+          // Recalculate uv
+          sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
+          #endif
 
           u32 sample_a = texture.pixels[(u32)uvx0 + (u32)uvy0 * texture.width];
           
@@ -442,29 +397,24 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
               uvx1 = clamp(uvx1, 0, (f32)texture.width  - 1);
               uvy1 = clamp(uvy1, 0, (f32)texture.height - 1);
 
-              // uvx1 = (f32)((u32)uvx1 % (texture.width  - 1));
-              // uvy1 = (f32)((u32)uvy1 % (texture.height - 1));
-              // if(uvx1 < texture.width && uvy1 < texture.height)
-              {
-                f32 blend_factor_x = frac(uvx0);
-                f32 blend_factor_y = frac(uvy0);
-                
-                u32 sample_b = texture.pixels[(u32)uvx1 + (u32)uvy0 * texture.width];
-                
-                u32 sample_c = texture.pixels[(u32)uvx0 + (u32)uvy1 * texture.width];
-                u32 sample_d = texture.pixels[(u32)uvx1 + (u32)uvy1 * texture.width];
+              f32 blend_factor_x = frac(uvx0);
+              f32 blend_factor_y = frac(uvy0);
+              
+              u32 sample_b = texture.pixels[(u32)uvx1 + (u32)uvy0 * texture.width];
+              
+              u32 sample_c = texture.pixels[(u32)uvx0 + (u32)uvy1 * texture.width];
+              u32 sample_d = texture.pixels[(u32)uvx1 + (u32)uvy1 * texture.width];
 
-                V4 sa = v4_from_u32(sample_a);
-                V4 sb = v4_from_u32(sample_b);
-                V4 sc = v4_from_u32(sample_c);
-                V4 sd = v4_from_u32(sample_d);
-                
-                V4 blend0 = blend(sa, sb, blend_factor_x);
-                V4 blend1 = blend(sc, sd, blend_factor_x);
+              V4 sa = v4_from_u32(sample_a);
+              V4 sb = v4_from_u32(sample_b);
+              V4 sc = v4_from_u32(sample_c);
+              V4 sd = v4_from_u32(sample_d);
+              
+              V4 blend0 = blend(sa, sb, blend_factor_x);
+              V4 blend1 = blend(sc, sd, blend_factor_x);
 
-                V4 blend2 = blend(blend0, blend1, blend_factor_y);
-                blend_color = blend2;
-              }
+              V4 blend2 = blend(blend0, blend1, blend_factor_y);
+              blend_color = blend2;
             }
             break;
           }
@@ -571,8 +521,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   f32 z_near = 0.01f;
   f32 aspect_ratio = (f32)window_width / (f32)window_height;
 
-  Texture checkerboard_texture = create_checkboard_texture(30, 30);
+  Texture checkerboard_texture = create_checkboard_texture(64, 64);
   checkerboard_texture.filter = BILINEAR;
+  generate_mipmaps(&checkerboard_texture);
 
   // Triangle t = {{0,0,0}, {150, 0, 0}, {150, 150, 0}};
   Triangle t = {};

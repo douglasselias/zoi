@@ -7,6 +7,16 @@ f32 TAU       = 6.28318530717958647692f;
 
 GENERIC T radian_from_turn(T turn) { return turn * (T)TAU; }
 
+f32 frac(f32 x) { return x - floorf(x); }
+f32 rfpart(f32 x) { return 1.0f - frac(x); }
+
+void swap(f32 *a, f32 *b)
+{
+  f32 c = *a;
+  *a = *b;
+  *b = c;
+}
+
 f32 blend(f32 a, f32 b, f32 t)
 {
   return (1 - t) * a + t * b;
