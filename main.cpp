@@ -250,10 +250,17 @@ struct Vertex
   f32 w;
 };
 
+enum TextureFilter
+{
+  NONE,
+  BILINEAR,
+};
+
 struct Texture
 {
   u32 width, height;
   u32 *pixels;
+  TextureFilter filter;
 };
 
 struct Mesh
@@ -414,13 +421,57 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
           V2 sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
 
-          u32 sample = texture.pixels[(u32)sample_uv.x + (u32)sample_uv.y * texture.width];
-          blend_color = v4_from_u32(sample);
+          f32 uvx0 = sample_uv.x;
+          f32 uvy0 = sample_uv.y;
+          f32 uvx1 = sample_uv.x + 1;
+          f32 uvy1 = sample_uv.y + 1;
+
+          u32 sample_a = texture.pixels[(u32)uvx0 + (u32)uvy0 * texture.width];
+          
+          switch(texture.filter)
+          {
+            case NONE:
+            {
+              blend_color = v4_from_u32(sample_a);
+            }
+            break;
+            case BILINEAR:
+            {
+              uvx0 = clamp(uvx0, 0, (f32)texture.width  - 1);
+              uvy0 = clamp(uvy0, 0, (f32)texture.height - 1);
+              uvx1 = clamp(uvx1, 0, (f32)texture.width  - 1);
+              uvy1 = clamp(uvy1, 0, (f32)texture.height - 1);
+
+              // uvx1 = (f32)((u32)uvx1 % (texture.width  - 1));
+              // uvy1 = (f32)((u32)uvy1 % (texture.height - 1));
+              // if(uvx1 < texture.width && uvy1 < texture.height)
+              {
+                f32 blend_factor_x = frac(uvx0);
+                f32 blend_factor_y = frac(uvy0);
+                
+                u32 sample_b = texture.pixels[(u32)uvx1 + (u32)uvy0 * texture.width];
+                
+                u32 sample_c = texture.pixels[(u32)uvx0 + (u32)uvy1 * texture.width];
+                u32 sample_d = texture.pixels[(u32)uvx1 + (u32)uvy1 * texture.width];
+
+                V4 sa = v4_from_u32(sample_a);
+                V4 sb = v4_from_u32(sample_b);
+                V4 sc = v4_from_u32(sample_c);
+                V4 sd = v4_from_u32(sample_d);
+                
+                V4 blend0 = blend(sa, sb, blend_factor_x);
+                V4 blend1 = blend(sc, sd, blend_factor_x);
+
+                V4 blend2 = blend(blend0, blend1, blend_factor_y);
+                blend_color = blend2;
+              }
+            }
+            break;
+          }
         }
 
         draw_pixel(buffer, x, y, u32_from_v4(blend_color));
       }
-      // else draw_pixel(buffer, x, y, (0x000000ff));
     }
   }
 }
@@ -521,6 +572,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   f32 aspect_ratio = (f32)window_width / (f32)window_height;
 
   Texture checkerboard_texture = create_checkboard_texture(30, 30);
+  checkerboard_texture.filter = BILINEAR;
 
   // Triangle t = {{0,0,0}, {150, 0, 0}, {150, 150, 0}};
   Triangle t = {};

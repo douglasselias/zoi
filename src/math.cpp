@@ -7,6 +7,18 @@ f32 TAU       = 6.28318530717958647692f;
 
 GENERIC T radian_from_turn(T turn) { return turn * (T)TAU; }
 
+f32 blend(f32 a, f32 b, f32 t)
+{
+  return (1 - t) * a + t * b;
+}
+
+f32 clamp(f32 value, f32 min_value, f32 max_value)
+{
+  value = min(value, max_value);
+  value = max(value, min_value);
+  return value;
+}
+
 struct V2 { f32 x, y; };
 
 V2 operator+(V2 a, V2 b)
@@ -139,6 +151,16 @@ union V4
 
   f32& operator[](u8 i) { return (&x)[i]; }
 };
+
+V4 blend(V4 a, V4 b, f32 t)
+{
+  V4 result = {};
+  result.x = blend(a.x, b.x, t);
+  result.y = blend(a.y, b.y, t);
+  result.z = blend(a.z, b.z, t);
+  result.w = blend(a.w, b.w, t);
+  return result;
+}
 
 
 V4 operator*(V4 v, f32 scalar)
