@@ -294,6 +294,28 @@ bool is_top_or_left_edge(V3 a, V3 b)
   return false;
 }
 
+V3 calculate_barycentric(V3 p, V3 a, V3 b, V3 c)
+{
+  V3 result = {};
+  result.x = cross(p-b, c-b).z; // Opposite of A
+  result.y = cross(p-c, a-c).z; // Opposite of B
+  result.z = cross(p-a, b-a).z; // Opposite of C
+  return result;
+}
+
+bool is_inside_triangle(V3 a, V3 b, V3 c, V3 bary)
+{
+  bool is_cb_top_left = is_top_or_left_edge(c, b);
+  bool is_ac_top_left = is_top_or_left_edge(a, c);
+  bool is_ba_top_left = is_top_or_left_edge(b, a);
+
+  bool passed_edge_a = bary.x < 0 || (bary.x == 0 && is_cb_top_left);
+  bool passed_edge_b = bary.y < 0 || (bary.y == 0 && is_ac_top_left);
+  bool passed_edge_c = bary.z < 0 || (bary.z == 0 && is_ba_top_left);
+
+  return passed_edge_a && passed_edge_b && passed_edge_c;
+}
+
 void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {})
 {
   V3 a = va.position;
@@ -314,47 +336,46 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
     {
       V3 p = {x, y, 0};
 
-      V3 pa = p - a;
-      V3 pb = p - b;
-      V3 pc = p - c;
+      V3 p0 = {x + 0.25f, y + 0.25f, 0};
+      V3 p1 = {x + 0.75f, y + 0.25f, 0};
+      V3 p2 = {x + 0.25f, y + 0.75f, 0};
+      V3 p3 = {x + 0.75f, y + 0.75f, 0};
 
-      V3 ba = b - a;
-      V3 cb = c - b;
-      V3 ac = a - c;
+      V3 bary0 = calculate_barycentric(p0, a, b, c);
+      V3 bary1 = calculate_barycentric(p1, a, b, c);
+      V3 bary2 = calculate_barycentric(p2, a, b, c);
+      V3 bary3 = calculate_barycentric(p3, a, b, c);
 
-      f32 w0 = cross(pb, cb).z; // Opposite of A
-      f32 w1 = cross(pc, ac).z; // Opposite of B
-      f32 w2 = cross(pa, ba).z; // Opposite of C
-      
-      bool is_cb_top_left = is_top_or_left_edge(c, b);
-      bool is_ac_top_left = is_top_or_left_edge(a, c);
-      bool is_ba_top_left = is_top_or_left_edge(b, a);
+      f32 coverage = 0;
+      if(is_inside_triangle(a, b, c, bary0)) coverage += 0.25f;
+      if(is_inside_triangle(a, b, c, bary1)) coverage += 0.25f;
+      if(is_inside_triangle(a, b, c, bary2)) coverage += 0.25f;
+      if(is_inside_triangle(a, b, c, bary3)) coverage += 0.25f;
 
-      bool passed_edge_a = w0 < 0 || (w0 == 0 && is_cb_top_left);
-      bool passed_edge_b = w1 < 0 || (w1 == 0 && is_ac_top_left);
-      bool passed_edge_c = w2 < 0 || (w2 == 0 && is_ba_top_left);
+      V3 bary = calculate_barycentric(p, a, b, c);
+      bool inside = is_inside_triangle(a, b, c, bary);
 
       // TODO: Hollow triangle
       #if 0
-      f32 area = w0 + w1 + w2;
-      bool passed_edge_a = (w0 / area) < 0.05f || (w0 == 0 && is_cb_top_left);
-      bool passed_edge_b = (w1 / area) < 0.05f || (w1 == 0 && is_ac_top_left);
-      bool passed_edge_c = (w2 / area) < 0.05f || (w2 == 0 && is_ba_top_left);
+      f32 area = bary.x + bary.y + bary.z;
+      bool passed_edge_a = (bary.x / area) < 0.05f || (bary.x == 0 && is_cb_top_left);
+      bool passed_edge_b = (bary.y / area) < 0.05f || (bary.y == 0 && is_ac_top_left);
+      bool passed_edge_c = (bary.z / area) < 0.05f || (bary.z == 0 && is_ba_top_left);
       #endif
  
       // TODO: Show overdraw
       #if 0
-      bool passed_edge_a = w0 <= 0;
-      bool passed_edge_b = w1 <= 0;
-      bool passed_edge_c = w2 <= 0;
+      bool passed_edge_a = bary.x <= 0;
+      bool passed_edge_b = bary.y <= 0;
+      bool passed_edge_c = bary.z <= 0;
       #endif
 
-      if(passed_edge_a && passed_edge_b && passed_edge_c)
+      if(coverage > 0)
       {
-        f32 area = w0 + w1 + w2;
-        f32 weight_a = (w0 / area);
-        f32 weight_b = (w1 / area);
-        f32 weight_c = (w2 / area);
+        f32 area = bary.x + bary.y + bary.z;
+        f32 weight_a = (bary.x / area);
+        f32 weight_b = (bary.y / area);
+        f32 weight_c = (bary.z / area);
 
         V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
 
@@ -420,7 +441,8 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           }
         }
 
-        draw_pixel(buffer, x, y, u32_from_v4(blend_color));
+        // draw_pixel(buffer, x, y, u32_from_v4(blend_color));
+        draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
       }
     }
   }
