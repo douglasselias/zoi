@@ -67,7 +67,11 @@ V2 operator/(V2 a, f32 scalar)
   };
 }
 
-struct V3 { f32 x, y, z; };
+union V3
+{
+  struct { f32 x, y, z; };
+  f32 e[3];
+};
 V3 UP_BASE_AXIS = {0, 0, 1};
 
 f32 dot(V3 a, V3 b)

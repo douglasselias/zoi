@@ -212,6 +212,29 @@ Texture create_checkboard_texture(u32 width, u32 height)
   return texture;
 }
 
+void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
+{
+  u32 cursor_x = x;
+  while(*text)
+  {
+    u8 c = *text;
+    for(u32 row = 0; row < 8; row++)
+    {
+      for(u32 col = 0; col < 8; col++)
+      {
+        s32 should_paint = font[c][row] & (1 << col);
+        if(should_paint)
+        {
+          draw_pixel_alpha(render_buffer, (f32)(cursor_x + col), (f32)(y + row), 0xffffffff, 1);
+        }
+      }
+    }
+
+    text++;
+    cursor_x += 8;
+  }
+}
+
 void generate_mipmaps(Texture *texture)
 {
   texture->mipmaps_count = (u32)log2f((f32)texture->width);
@@ -350,13 +373,14 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
 
         V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
 
+        f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
+
         if(texture.pixels)
         {
           V2 uva = (va.uv / va.w) * weight_a;
           V2 uvb = (vb.uv / vb.w) * weight_b;
           V2 uvc = (vc.uv / vc.w) * weight_c;
           
-          f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
           V2 sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
           
           f32 uvx0 = sample_uv.x;
@@ -412,70 +436,175 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           }
         }
 
-        draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
-      }
-    }
-  }
-}
-
-Vertex project(Vertex v, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
-{
-  Vertex result = {};
-  memcpy(&result, &v, sizeof(Vertex));
-
-  V4 projected_position = (V4_from(v.position, 1) * model_to_view * view_to_projection);
-  V3 normalized_position = projected_position.rgb / projected_position.w;
-  V3 screen_position = ndc_to_screen(normalized_position, window_width, window_height);
-
-  result.position = screen_position;
-  result.w = projected_position.w;
-  return result;
-}
-
-void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
-{
-  u32 cursor_x = x;
-  while(*text)
-  {
-    u8 c = *text;
-    for(u32 row = 0; row < 8; row++)
-    {
-      for(u32 col = 0; col < 8; col++)
-      {
-        s32 should_paint = font[c][row] & (1 << col);
-        if(should_paint)
+        f32 *current_depth = &buffer->z_buffer[(u32)x + (u32)y * buffer->width];
+        if(inv_w > *current_depth)
         {
-          draw_pixel_alpha(render_buffer, (f32)(cursor_x + col), (f32)(y + row), 0xffffffff, 1);
+          *current_depth = inv_w;
+          draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
         }
       }
     }
-
-    text++;
-    cursor_x += 8;
   }
 }
 
 f32 angle = 0;
 
+bool is_outside_frustum(V3 p)
+{
+  bool outside_of_x = p.x > 1 || p.x < -1;
+  bool outside_of_y = p.y > 1 || p.y < -1;
+  bool outside_of_z = p.z > 1 || p.z < -1;
+  return outside_of_x || outside_of_y || outside_of_z;
+}
 
 void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height)
 {
   u32 total_triangles = mesh.vertices_count / 3;
 
+  Vertex vs[3] = {};
+  bool outside[3] = {};
+  V3 ndc[3] = {};
   for(u32 i = 0; i < total_triangles; i++)
   {
-    Vertex va = mesh.vertices[(i * 3) + 0];
-    Vertex vb = mesh.vertices[(i * 3) + 1];
-    Vertex vc = mesh.vertices[(i * 3) + 2];
+    for(u32 j = 0; j < 3; j++)
+    {
+      Vertex mv = mesh.vertices[(i * 3) + j];
 
-    {      
-      va = project(va, model_to_view, view_to_projection, render_width, render_height);
-      vb = project(vb, model_to_view, view_to_projection, render_width, render_height);
-      vc = project(vc, model_to_view, view_to_projection, render_width, render_height);
-      
-      draw_triangle(render_buffer, va, vb, vc, mesh.texture);
+      Vertex result = {};
+      memcpy(&result, &mv, sizeof(Vertex));
+
+      V4 projected_position = (V4_from(result.position, 1) * model_to_view * view_to_projection);
+      V3 normalized_position = projected_position.rgb / projected_position.w;
+      ndc[j] = normalized_position;
+      V3 screen_position = ndc_to_screen(normalized_position, render_width, render_height);
+
+      result.position = screen_position;
+      result.w = projected_position.w;
+
+      vs[j] = result;
+
+      outside[j] = is_outside_frustum(ndc[j]);
+    }
+
+    if(outside[0] && outside[1] && outside[2])
+    {
+      continue;
+    }
+
+    #if 0
+    // Backface culling: signed area < 0 => CW (front face). Skip CCW triangles.
+    V3 ab = vs[1].position - vs[0].position;
+    V3 ac = vs[2].position - vs[0].position;
+    f32 signed_area = ab.x * ac.y - ab.y * ac.x;
+    if(signed_area >= 0) continue;
+    #endif
+
+    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture);
+  }
+}
+
+struct String
+{
+  char *text;
+  u32 size;
+};
+
+bool operator==(String a, String b)
+{
+  if(a.size != b.size) return false;
+
+  for(u32 i = 0; i < a.size; i++)
+  {
+    if(a.text[i] != b.text[i])
+    {
+      return false;
     }
   }
+  return true;
+}
+
+String slice(String s, u32 begin, u32 end = 0)
+{
+  String result = {};
+  result.text = s.text + begin;
+  if(end == 0) end = s.size;
+  result.size = end - begin;
+  return result;
+}
+
+String* split(String s, char c, u32 *size)
+{
+  String *result = calloc(1, sizeof(String));
+  u32 begin = 0;
+
+  for(u32 i = 0; i < s.size; i++)
+  {
+    if(s.text[i] == c)
+    {
+      result[*size] = slice(s, begin, i);
+      (*size)++;
+      begin += i + 1;
+    }
+  }
+
+  (*size)++;
+
+  return result;
+}
+
+#define S(text) String{text, sizeof(text)};
+
+Mesh parse_obj(char *file_path)
+{
+  FILE *file = fopen(file_path, "r");
+  assert(file);
+
+  fseek(file, 0, SEEK_END);
+  u64 file_size = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  char *content = (char*)malloc(file_size + 1);
+  fread(content, 1, file_size, file);
+  content[file_size] = '\0';
+  fclose(file);
+
+  Mesh result = {};
+
+  u32 lines_count = 0;
+  String *lines = split(content, '\n', &lines_count);
+
+  for(u32 i = 0; i < lines_count; i++)
+  {
+    String line = lines[i];
+
+    if(line == S("#")) continue;
+    if(line == S("s")) continue;
+
+    if(line == S("v"))
+    {
+      String *str_v = split(slice(line, 1), ' ');
+
+      u32 vertices[3] = {};
+      for(u32 j = 0; j < 3; j++)
+      {
+        vertices[j] = atof(str_v[j]);
+        mesh.vertices_count++;
+        mesh.vertices = (Vertex*)realloc(mesh.vertices_count * sizeof(Vertex));
+        Vertex *vertex = &mesh.vertices[mesh.vertices_count - 1];
+        memset(vertex, 0, sizeof(Vertex));
+
+        vertex->position = {};
+      }
+
+    }
+    if(line == S("vt"))
+    {}
+    if(line == S("vn"))
+    {}
+  }
+
+  free(content);
+  return result;
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
@@ -490,9 +619,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   window_height = 600;
   window_width  = 640;
   window_height = 480;
-  #if 0
   window_width  = 50;
   window_height = 50;
+  #if 0
   #endif
 
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
