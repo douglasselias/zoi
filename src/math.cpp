@@ -254,6 +254,11 @@ u32 u32_from_v3(V3 v)
   return r | g | b;
 }
 
+V3 V3_from(V4 v)
+{
+  return {v.x, v.y, v.z};
+}
+
 V4 V4_from(V3 v, f32 w = 0)
 {
   return {v.x, v.y, v.z, w};

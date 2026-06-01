@@ -158,6 +158,12 @@ struct Vertex
   f32 w;
 };
 
+union Triangle
+{
+  struct { V3 a, b, c; };
+  V3 vertices[3];
+};
+
 enum TextureFilter
 {
   NONE,
@@ -191,7 +197,6 @@ Texture create_checkboard_texture(u32 width, u32 height)
   {
     for(u32 x = 0; x < texture.width; x++)
     {
-      // u32 tile_size = 4;
       u32 tile_size = 1;
       if(((x / tile_size) + (y / tile_size)) % 2 == 0)
       {
@@ -244,40 +249,6 @@ void generate_mipmaps(Texture *texture)
 
         u32 color = u32_from_v4(blend2);
         mipmap->pixels[x + y * mipmap->width] = color;
-      }
-    }
-  }
-}
-
-void draw_triangle(RenderBuffer *buffer, V3 a, V3 b, V3 c, u32 color)
-{
-  f32 min_x = min(min(a.x, b.x), c.x);
-  f32 max_x = max(max(a.x, b.x), c.x);
-  f32 min_y = min(min(a.y, b.y), c.y);
-  f32 max_y = max(max(a.y, b.y), c.y);
-
-  for(f32 y = min_y; y < max_y; y++)
-  {
-    for(f32 x = min_x; x < max_x; x++)
-    {
-      V3 p = {x, y, 0};
-
-      V3 pa = p - a;
-      V3 pb = p - b;
-      V3 pc = p - c;
-
-      V3 ba = b - a;
-      V3 cb = c - b;
-      V3 ac = a - c;
-
-      f32 w0 = cross(ba, pa).z;
-      f32 w1 = cross(cb, pb).z;
-      f32 w2 = cross(ac, pc).z;
-
-      if(w0 >= 0 && w1 >= 0 && w2 >= 0)
-      {
-        draw_pixel(buffer, x, y, color);
-        // buffer->pixel_buffer[(u32)x + (u32)y * buffer->width] = color;
       }
     }
   }
@@ -441,18 +412,11 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           }
         }
 
-        // draw_pixel(buffer, x, y, u32_from_v4(blend_color));
         draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
       }
     }
   }
 }
-
-union Triangle
-{
-  struct { V3 a, b, c; };
-  V3 vertices[3];
-};
 
 Vertex project(Vertex v, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
 {
@@ -466,20 +430,6 @@ Vertex project(Vertex v, Matrix model_to_view, Matrix view_to_projection, u32 wi
   result.position = screen_position;
   result.w = projected_position.w;
   return result;
-}
-
-Triangle project(Triangle t, Matrix model_to_view, Matrix view_to_projection, u32 window_width, u32 window_height)
-{
-  V4 cta = (V4_from(t.a, 1) * model_to_view * view_to_projection);
-  V4 ctb = (V4_from(t.b, 1) * model_to_view * view_to_projection);
-  V4 ctc = (V4_from(t.c, 1) * model_to_view * view_to_projection);
-  V3 ndc_ta = cta.rgb / cta.w;
-  V3 ndc_tb = ctb.rgb / ctb.w;
-  V3 ndc_tc = ctc.rgb / ctc.w;
-  V3 ta = ndc_to_screen(ndc_ta, window_width, window_height);
-  V3 tb = ndc_to_screen(ndc_tb, window_width, window_height);
-  V3 tc = ndc_to_screen(ndc_tc, window_width, window_height);
-  return {ta, tb, tc};
 }
 
 void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
@@ -505,32 +455,46 @@ void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
   }
 }
 
-void draw_mesh(RenderBuffer *render_buffer, Mesh mesh)
+f32 angle = 0;
+
+
+void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height)
 {
   u32 total_triangles = mesh.vertices_count / 3;
+
   for(u32 i = 0; i < total_triangles; i++)
   {
     Vertex va = mesh.vertices[(i * 3) + 0];
     Vertex vb = mesh.vertices[(i * 3) + 1];
     Vertex vc = mesh.vertices[(i * 3) + 2];
-    draw_triangle(render_buffer, va, vb, vc, mesh.texture);
+
+    {      
+      va = project(va, model_to_view, view_to_projection, render_width, render_height);
+      vb = project(vb, model_to_view, view_to_projection, render_width, render_height);
+      vc = project(vc, model_to_view, view_to_projection, render_width, render_height);
+      
+      draw_triangle(render_buffer, va, vb, vc, mesh.texture);
+    }
   }
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
-  // u32 window_width  = 2560;
-  // u32 window_height = 1080;
-  // u32 window_width  = 1280;
-  // u32 window_height = 720;
-  // u32 window_width  = 1024;
-  // u32 window_height = 768;
-  // u32 window_width  = 800;
-  // u32 window_height = 600;
-  u32 window_width  = 640;
-  u32 window_height = 480;
-  // u32 window_width  = 50;
-  // u32 window_height = 50;
+  u32 window_width  = 2560;
+  u32 window_height = 1080;
+  window_width  = 1280;
+  window_height = 720;
+  window_width  = 1024;
+  window_height = 768;
+  window_width  = 800;
+  window_height = 600;
+  window_width  = 640;
+  window_height = 480;
+  #if 0
+  window_width  = 50;
+  window_height = 50;
+  #endif
+
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
   u32 render_scale = 4;
@@ -546,12 +510,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   Texture checkerboard_texture = create_checkboard_texture(64, 64);
   checkerboard_texture.filter = BILINEAR;
   generate_mipmaps(&checkerboard_texture);
-
-  // Triangle t = {{0,0,0}, {150, 0, 0}, {150, 150, 0}};
-  Triangle t = {};
-  t.vertices[0] = { 0.93f,  0.0f, 0.0f};
-  t.vertices[1] = { 0.63f, -0.2f, 0.3f};
-  t.vertices[2] = {-0.33f,  0.2f, 0.3f};
 
   Triangle top = {};
   top.vertices[0] = {0.9f, -0.8f,  1.0f};
@@ -595,12 +553,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     quad.vertices[i].color = {1, 1, 1, 1}; // TODO: Handle both 255 and 1 range.
   }
 
-  Mesh projected_quad = {};
-  projected_quad.texture = quad.texture;
-  projected_quad.vertices_count = quad.vertices_count;
-  projected_quad.vertices = (Vertex*)malloc(quad.vertices_count * sizeof(Vertex));
-
-  // Cube at x:[0.3,0.9] y:[-0.4,0.4] z:[-0.4,0.4]
   V3 v0 = {0.3f, -0.4f, -0.4f};
   V3 v1 = {0.9f, -0.4f, -0.4f};
   V3 v2 = {0.9f,  0.4f, -0.4f};
@@ -610,24 +562,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   V3 v6 = {0.9f,  0.4f,  0.4f};
   V3 v7 = {0.3f,  0.4f,  0.4f};
 
-  // Triangle cube[12] =
-  // {
-  //   {v0, v4, v7}, {v0, v7, v3}, // near   (x=0.3)
-  //   {v1, v2, v6}, {v1, v6, v5}, // far    (x=0.9)
-  //   {v0, v1, v5}, {v0, v5, v4}, // bottom (y=-0.4)
-  //   {v3, v7, v6}, {v3, v6, v2}, // top    (y=+0.4)
-  //   {v0, v3, v2}, {v0, v2, v1}, // back   (z=-0.4)
-  //   {v4, v5, v6}, {v4, v6, v7}, // front  (z=+0.4)
-  // };
-
-  Triangle cube[12] =
+  V3 cube[] =
   {
-    {v0, v7, v4}, {v0, v3, v7}, // near   (x=0.3)
-    {v1, v6, v2}, {v1, v5, v6}, // far    (x=0.9)
-    {v0, v5, v1}, {v0, v4, v5}, // bottom (y=-0.4)
-    {v3, v6, v7}, {v3, v2, v6}, // top    (y=+0.4)
-    {v0, v2, v3}, {v0, v1, v2}, // back   (z=-0.4)
-    {v4, v6, v5}, {v4, v7, v6}, // front  (z=+0.4)
+    v0, v7, v4, v0, v3, v7, // near
+    v1, v6, v2, v1, v5, v6, // far
+    v0, v5, v1, v0, v4, v5, // bottom
+    v3, v6, v7, v3, v2, v6, // top
+    v0, v2, v3, v0, v1, v2, // back
+    v4, v6, v5, v4, v7, v6, // front
   };
 
   V4 face_colors[6] =
@@ -640,16 +582,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     {0,1,1,1}, // front  - cyan
   };
 
-  bool hide_triangle = false;
-  bool hide_triangle1 = false;
+  Mesh cube_mesh = {};
+  cube_mesh.vertices_count = 12 * 3;
+  cube_mesh.vertices = (Vertex*)malloc(cube_mesh.vertices_count * sizeof(Vertex));
+  u32 face_color_index = 0;
+  for(u32 i = 0; i < cube_mesh.vertices_count; i++)
+  {
+    cube_mesh.vertices[i].position = cube[i];
+    cube_mesh.vertices[i].color = face_colors[face_color_index];
+    
+    if(i != 0 && (i % 6 == 0))
+    {
+      face_color_index++;
+    }
+  }
 
   s64 cpu_frequency = get_os_timer_frequency();
   char fps_text[32];
-
-  // u32 frame_counter = 0;
-  // f32 fps = 0;
-  // f32 rate_timer = 0;
-  // s64 begin_frame_time = 0;
 
   Time time = init_time();
   Frame frame = {};
@@ -671,9 +620,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
       }
     }
 
-    if(is_key_pressed(KEY_G)) hide_triangle = !hide_triangle;
-    if(is_key_pressed(KEY_H)) hide_triangle1 = !hide_triangle1;
-
     if(is_key_pressed(KEY_ESCAPE))
     {
       running = false;
@@ -691,102 +637,41 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     camera_actions.is_looking_up    = is_key_down(KEY_I);
     camera_actions.is_looking_down  = is_key_down(KEY_K);
 
-    f32 FIXED_DT = 1.0f / 60.0f;
-    update_camera(camera_actions, &camera, FIXED_DT);
+    update_camera(camera_actions, &camera, dt);
 
     Matrix model_to_view = create_view_matrix(camera.position, camera.target);
     Matrix view_to_projection = create_perspective_projection_matrix(aspect_ratio, fov_y, z_near);
 
     clear_buffer(&render_buffer);
 
-    for(u32 x = 0; x < render_buffer.width; x++)
-    {
-      // draw_pixel(&render_buffer, (f32)x, 50, 0xffff0000);
-      // draw_pixel(&render_buffer, (f32)x, 50, 0xff0000ff);
-    }
-    // draw_pixel(&render_buffer, 10, 10, 0xfff00fff);
-    // draw_pixel(&render_buffer, 10, 10, 0x0000ff00);
-    u32 pixel_size = 6;
+    #if 0
+    u32 pixel_size = 32;
     for(f32 y = 0; y < pixel_size; y++)
     {
       for(f32 x = 0; x < pixel_size; x++)
       {
-        // draw_pixel(&render_buffer, x + (0 * pixel_size), y, 0xff000000);
-        // draw_pixel(&render_buffer, x + (1 * pixel_size), y, 0x00ff0000);
-        // draw_pixel(&render_buffer, x + (2 * pixel_size), y, 0x0000ff00);
+        draw_pixel(&render_buffer, x + (0 * pixel_size), y, 0xff0000ff);
+        draw_pixel(&render_buffer, x + (1 * pixel_size), y, 0x00ff00ff);
+        draw_pixel(&render_buffer, x + (2 * pixel_size), y, 0x0000ffff);
+        draw_pixel(&render_buffer, x + (3 * pixel_size), y, 0xffff00ff);
       }
     }
+    #endif
 
-    // draw_line(&render_buffer,  0, 0, 1, 0.5f, 0xffffffff);
-    // draw_line(&render_buffer, 30, 30, 60, 10, 0xffffffff);
-    // draw_line(&render_buffer, 0, 0, (f32)window_width, (f32)window_height, 0xffffffff);
-    // draw_line(&render_buffer, 0, 0, (f32)window_width, (f32)window_height, 0xffffff77);
-    // draw_line_aa(&render_buffer, 0, (f32)window_height, (f32)window_width, 0, 0xffffffff);
-
-    // draw_triangle(&render_buffer, {0,0,0}, {50, 0, 0}, {50, 50, 0}, 0x550000ff);
-    V4 cta = (V4_from(t.a, 1) * model_to_view * view_to_projection);
-    V4 ctb = (V4_from(t.b, 1) * model_to_view * view_to_projection);
-    V4 ctc = (V4_from(t.c, 1) * model_to_view * view_to_projection);
-    V3 ndc_ta = cta.rgb / cta.w;
-    V3 ndc_tb = ctb.rgb / ctb.w;
-    V3 ndc_tc = ctc.rgb / ctc.w;
-    V3 ta = ndc_to_screen(ndc_ta, render_buffer.width, render_buffer.height);
-    V3 tb = ndc_to_screen(ndc_tb, render_buffer.width, render_buffer.height);
-    V3 tc = ndc_to_screen(ndc_tc, render_buffer.width, render_buffer.height);
-
-    // draw_triangle(&render_buffer, t.a, t.b, t.c, 0x550000ff);
-    // draw_triangle(&render_buffer, ta, tb, tc, 0x550000ff);
-
-    Triangle ptop    = project(top, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    Triangle pbottom = project(bottom, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    if(!hide_triangle)
-    {
-      Vertex a = {ptop.a, {1,0,0,1}};
-      Vertex b = {ptop.b, {0,1,0,1}};
-      Vertex c = {ptop.c, {0,0,1,1}};
-      // draw_triangle(&render_buffer, ptop.a, ptop.b, ptop.c, 0x555500ff);
-      // draw_triangle(&render_buffer, a, b, c);
-    }
-    if(!hide_triangle1)
-    {
-      Vertex a = {pbottom.a, {1,0,0,1}};
-      Vertex b = {pbottom.b, {0,1,0,1}};
-      Vertex c = {pbottom.c, {0,0,1,1}};
-      // draw_triangle(&render_buffer, pbottom.a, pbottom.b, pbottom.c, 0x55005555);
-      // draw_triangle(&render_buffer, a, b, c);
-    }
-
-
-    for(u32 i = 0; i < quad.vertices_count; i++)
-    {
-      projected_quad.vertices[i] = project(quad.vertices[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    }
-    draw_mesh(&render_buffer, projected_quad);
-    // draw_mesh(&render_buffer, quad);
+    draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
 
     // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
-    // {      
-    //   for(u32 i = 0; i < 12; i++)
-    //   {
-    //     Triangle pt = project(cube[i], model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    //     V4 color = face_colors[i / 2];
-    //     Vertex a = {pt.a, color};
-    //     Vertex b = {pt.b, color};
-    //     Vertex c = {pt.c, color};
-    //     draw_triangle(&render_buffer, a, b, c);
-    //   }      
-    // }
     // end_profile(cube_profile);
 
-    // snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", frame.rate);
     snprintf(fps_text, sizeof(fps_text), "FPS: %.4f", 1/frame.rate);
-    // snprintf(fps_text, sizeof(fps_text), "Douglas: %.4f", 1.0);
-    // snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", frame.rate_timer);
     draw_text(&render_buffer, 4, 3, fps_text);
-    // draw_text(&render_buffer, 4, 3, "FPS");
     
     // snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
     // draw_text(&render_buffer, 4, 13, fps_text);
+
+    snprintf(fps_text, sizeof(fps_text), "Dot: %.4f", angle);
+    draw_text(&render_buffer, 4, 13, fps_text);
 
     draw_frame(pipeline, &render_buffer);
 
