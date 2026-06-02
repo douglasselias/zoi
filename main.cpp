@@ -534,7 +534,7 @@ String slice(String s, u32 begin, u32 end = 0)
 
 String* split(String s, char c, u32 *size)
 {
-  String *result = calloc(1, sizeof(String));
+  String *result = (String*)calloc(1, sizeof(String));
   u32 begin = 0;
 
   for(u32 i = 0; i < s.size; i++)
@@ -552,9 +552,32 @@ String* split(String s, char c, u32 *size)
   return result;
 }
 
-#define S(text) String{text, sizeof(text)};
+#define S(text) String{text, sizeof(text)}
 
-Mesh parse_obj(char *file_path)
+union Indexes
+{
+  struct { u32 v, u, n; };
+  u32 e[3];
+};
+
+struct Face
+{
+  Indexes indexes[4];
+};
+
+struct Obj
+{
+  V3 *vertices;
+  u32 vertices_count;
+  V2 *uvs;
+  u32 uvs_count;
+  V3 *normals;
+  u32 normals_count;
+  Face *faces;
+  u32 faces_count;
+};
+
+Obj parse_obj(char *file_path)
 {
   FILE *file = fopen(file_path, "r");
   assert(file);
@@ -568,43 +591,93 @@ Mesh parse_obj(char *file_path)
   content[file_size] = '\0';
   fclose(file);
 
-  Mesh result = {};
+  Obj obj = {};
 
   u32 lines_count = 0;
-  String *lines = split(content, '\n', &lines_count);
+  String content_str = String{content, (u32)strlen(content)};
+  String *lines = split(content_str, '\n', &lines_count);
 
   for(u32 i = 0; i < lines_count; i++)
   {
     String line = lines[i];
 
-    if(line == S("#")) continue;
-    if(line == S("s")) continue;
-
+    String sliced = slice(line, 0, 1);
     if(line == S("v"))
     {
-      String *str_v = split(slice(line, 1), ' ');
+      u32 unused_count = 0;
+      String *vertex = split(slice(line, 1), ' ', &unused_count);
 
-      u32 vertices[3] = {};
+      f32 vertices[3] = {};
       for(u32 j = 0; j < 3; j++)
       {
-        vertices[j] = atof(str_v[j]);
-        mesh.vertices_count++;
-        mesh.vertices = (Vertex*)realloc(mesh.vertices_count * sizeof(Vertex));
-        Vertex *vertex = &mesh.vertices[mesh.vertices_count - 1];
-        memset(vertex, 0, sizeof(Vertex));
-
-        vertex->position = {};
+        vertices[j] = (f32)atof(vertex[j].text);
       }
 
+      obj.vertices_count++;
+      obj.vertices = (V3*)realloc(obj.vertices, obj.vertices_count * sizeof(V3));
+      memcpy(&obj.vertices[obj.vertices_count - 1], vertices, sizeof(V3));
     }
-    if(line == S("vt"))
-    {}
-    if(line == S("vn"))
-    {}
+
+    if(slice(line, 0, 2) == S("vt"))
+    {
+      u32 unused_count = 0;
+      String *uv = split(slice(line, 1), ' ', &unused_count);
+
+      f32 uvs[2] = {};
+      for(u32 j = 0; j < 2; j++)
+      {
+        uvs[j] = (f32)atof(uv[j].text);
+      }
+
+      obj.uvs_count++;
+      obj.uvs = (V2*)realloc(obj.uvs, obj.uvs_count * sizeof(V2));
+      memcpy(&obj.uvs[obj.uvs_count - 1], uvs, sizeof(V2));
+    }
+
+    if(slice(line, 0, 2) == S("vn"))
+    {
+      u32 unused_count = 0;
+      String *normal = split(slice(line, 1), ' ', &unused_count);
+
+      f32 normals[3] = {};
+      for(u32 j = 0; j < 3; j++)
+      {
+        normals[j] = (f32)atof(normal[j].text);
+      }
+
+      obj.normals_count++;
+      obj.normals = (V3*)realloc(obj.normals, obj.normals_count * sizeof(V3));
+      memcpy(&obj.normals[obj.normals_count - 1], normals, sizeof(V3));
+    }
+
+    if(slice(line, 0, 1) == S("f"))
+    {
+      u32 unused_count = 0;
+      String *face_str = split(slice(line, 1), ' ', &unused_count);
+
+      Face face = {};
+      for(u32 j = 0; j < 4; j++)
+      {
+        String *indexes_str = split(face_str[j], '/', &unused_count);
+        for(u32 k = 0; k < 3; k++)
+        {
+          face.indexes[j].e[k] = (u32)atoi(indexes_str[k].text);
+        }
+      }
+
+      obj.faces_count++;
+      obj.faces = (Face*)realloc(obj.faces, obj.faces_count * sizeof(Face));
+      memcpy(&obj.faces[obj.faces_count - 1], &face, sizeof(Face));
+    }
   }
 
   free(content);
-  return result;
+  return obj;
+}
+
+Mesh mesh_from_obj(Obj obj)
+{
+  return {};
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
@@ -731,6 +804,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
   Time time = init_time();
   Frame frame = {};
+
+  Obj cube_obj = parse_obj("assets/cube.obj");
 
   for(bool running = true; running;)
   {

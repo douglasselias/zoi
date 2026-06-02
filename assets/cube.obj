@@ -1,5 +1,3 @@
-# This file uses meters as units for non-parametric coordinates.
-
 v -50.000000 -50.000000 50.000000
 v 50.000000 -50.000000 50.000000
 v -50.000000 50.000000 50.000000
