@@ -8,6 +8,7 @@
 #include "src/font.cpp"
 #include "src/timing.cpp"
 #include "src/string.cpp"
+#include "src/obj_parser.cpp"
 
 void draw_pixel(RenderBuffer *buffer, f32 x, f32 y, u32 color)
 {
@@ -188,6 +189,13 @@ struct Mesh
   Texture texture;
 };
 
+struct Light
+{
+  V3 position;
+  V3 direction;
+  V4 color;
+};
+
 Texture create_checkboard_texture(u32 width, u32 height)
 {
   Texture texture = {};
@@ -312,7 +320,7 @@ bool is_inside_triangle(V3 a, V3 b, V3 c, V3 bary)
   return passed_edge_a && passed_edge_b && passed_edge_c;
 }
 
-void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {})
+void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {}, f32 light_intensities = 0)
 {
   V3 a = va.position;
   V3 b = vb.position;
@@ -442,6 +450,7 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
         if(inv_w > *current_depth)
         {
           *current_depth = inv_w;
+          blend_color = blend_color * light_intensities;
           draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
         }
       }
@@ -459,7 +468,7 @@ bool is_outside_frustum(V3 p)
   return outside_of_x || outside_of_y || outside_of_z;
 }
 
-void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height)
+void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height, Light light)
 {
   u32 total_triangles = mesh.vertices_count / 3;
 
@@ -468,6 +477,18 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
   V3 ndc[3] = {};
   for(u32 i = 0; i < total_triangles; i++)
   {
+    V3 a = mesh.vertices[(i * 3) + 0].position;
+    V3 b = mesh.vertices[(i * 3) + 1].position;
+    V3 c = mesh.vertices[(i * 3) + 2].position;
+
+    V3 normal_dir = cross(b - a, c - a);
+
+    V4 view_normal = V4_from(normal_dir, 0) * model_to_view;
+    V4 view_light_dir = V4_from(light.direction, 0);
+
+    f32 ambient = 0.1f;
+    f32 light_intensities = clamp(dot(normalize(view_normal), normalize(view_light_dir)), 0, 1) + ambient;
+
     for(u32 j = 0; j < 3; j++)
     {
       Vertex mv = mesh.vertices[(i * 3) + j];
@@ -501,115 +522,8 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
     if(signed_area >= 0) continue;
     #endif
 
-    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture);
+    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture, light_intensities);
   }
-}
-
-union Indexes
-{
-  struct { u32 v, u, n; };
-  u32 e[3];
-};
-
-struct Face
-{
-  Indexes indexes[4];
-};
-
-struct Obj
-{
-  V3 *vertices;
-  u32 vertices_count;
-  V2 *uvs;
-  u32 uvs_count;
-  V3 *normals;
-  u32 normals_count;
-  Face *faces;
-  u32 faces_count;
-};
-
-Obj parse_obj(char *file_path)
-{
-  FILE *file = fopen(file_path, "r");
-
-  fseek(file, 0, SEEK_END);
-  u64 file_size = ftell(file);
-  fseek(file, 0, SEEK_SET);
-
-  char *content = (char*)malloc(file_size + 1);
-  fread(content, 1, file_size, file);
-  content[file_size] = '\0';
-  fclose(file);
-
-  Obj obj = {};
-
-  u32 lines_count = 0;
-  String content_string = {content, (u32)file_size};
-  String *lines = split(content_string, '\n', &lines_count);
-
-  for(u32 i = 0; i < lines_count; i++)
-  {
-    String line = lines[i];
-    u32 unused = 0;
-    String *line_contents = split(line, ' ', &unused);
-
-    if(line_contents[0] == S("v"))
-    {
-      f32 vertices[3] = {};
-      for(u32 j = 0; j < 3; j++)
-      {
-        vertices[j] = (f32)atof(line_contents[j + 1].text);
-      }
-
-      obj.vertices_count += 1;
-      obj.vertices = (V3*)realloc(obj.vertices, obj.vertices_count * sizeof(V3));
-      memcpy(obj.vertices + obj.vertices_count - 1, vertices, sizeof(V3));
-    }
-    else if(line_contents[0] == S("vt"))
-    {
-      f32 uvs[2] = {};
-      for(u32 j = 0; j < 2; j++)
-      {
-        uvs[j] = (f32)atof(line_contents[j + 1].text);
-      }
-
-      obj.uvs_count += 1;
-      obj.uvs = (V2*)realloc(obj.uvs, obj.uvs_count * sizeof(V2));
-      memcpy(obj.uvs + obj.uvs_count - 1, uvs, sizeof(V2));
-    }
-    else if(line_contents[0] == S("vn"))
-    {
-      f32 normals[3] = {};
-      for(u32 j = 0; j < 3; j++)
-      {
-        normals[j] = (f32)atof(line_contents[j + 1].text);
-      }
-
-      obj.normals_count += 1;
-      obj.normals = (V3*)realloc(obj.normals, obj.normals_count * sizeof(V3));
-      memcpy(obj.normals + obj.normals_count - 1, normals, sizeof(V3));
-    }
-    else if(line_contents[0] == S("f"))
-    {      
-      Face face = {};
-      for(u32 j = 0; j < 4; j++)
-      {
-        u32 unused_count = 0;
-        String *indexes_string = split(line_contents[j + 1], '/', &unused_count);
-        for(u32 k = 0; k < 3; k++)
-        {
-          face.indexes[j].e[k] = (u32)atoi(indexes_string[k].text);
-        }
-      }
-
-      obj.faces_count++;
-      obj.faces = (Face*)realloc(obj.faces, obj.faces_count * sizeof(Face));
-      memcpy(&obj.faces[obj.faces_count - 1], &face, sizeof(Face));
-    }
-  }
-
-  free(content);
-  return obj;
 }
 
 Mesh mesh_from_obj(Obj obj)
@@ -635,13 +549,6 @@ Mesh mesh_from_obj(Obj obj)
 
   return mesh;
 }
-
-struct Light
-{
-  V3 position;
-  V3 direction;
-  V4 color;
-};
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
@@ -843,11 +750,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     }
     #endif
 
-    // draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    // draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
+    // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
     Matrix scale = create_scale_matrix(0.01f);
     Matrix position = create_translation_matrix(200, 0, 0);
-    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
 
     // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
     // end_profile(cube_profile);
