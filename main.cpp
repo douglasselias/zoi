@@ -7,6 +7,7 @@
 #include "src/math.cpp"
 #include "src/font.cpp"
 #include "src/timing.cpp"
+#include "src/string.cpp"
 
 void draw_pixel(RenderBuffer *buffer, f32 x, f32 y, u32 color)
 {
@@ -156,6 +157,7 @@ struct Vertex
   V4 color;
   V2 uv;
   f32 w;
+  V3 normal;
 };
 
 union Triangle
@@ -503,57 +505,6 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
   }
 }
 
-struct String
-{
-  char *text;
-  u32 size;
-};
-
-bool operator==(String a, String b)
-{
-  if(a.size != b.size) return false;
-
-  for(u32 i = 0; i < a.size; i++)
-  {
-    if(a.text[i] != b.text[i])
-    {
-      return false;
-    }
-  }
-  return true;
-}
-
-String slice(String s, u32 begin, u32 end = 0)
-{
-  String result = {};
-  result.text = s.text + begin;
-  if(end == 0) end = s.size;
-  result.size = end - begin;
-  return result;
-}
-
-String* split(String s, char c, u32 *size)
-{
-  String *result = (String*)calloc(1, sizeof(String));
-  u32 begin = 0;
-
-  for(u32 i = 0; i < s.size; i++)
-  {
-    if(s.text[i] == c)
-    {
-      result[*size] = slice(s, begin, i);
-      (*size)++;
-      begin += i + 1;
-    }
-  }
-
-  (*size)++;
-
-  return result;
-}
-
-#define S(text) String{text, sizeof(text)}
-
 union Indexes
 {
   struct { u32 v, u, n; };
@@ -580,7 +531,6 @@ struct Obj
 Obj parse_obj(char *file_path)
 {
   FILE *file = fopen(file_path, "r");
-  assert(file);
 
   fseek(file, 0, SEEK_END);
   u64 file_size = ftell(file);
@@ -594,74 +544,61 @@ Obj parse_obj(char *file_path)
   Obj obj = {};
 
   u32 lines_count = 0;
-  String content_str = String{content, (u32)strlen(content)};
-  String *lines = split(content_str, '\n', &lines_count);
+  String content_string = {content, (u32)file_size};
+  String *lines = split(content_string, '\n', &lines_count);
 
   for(u32 i = 0; i < lines_count; i++)
   {
     String line = lines[i];
+    u32 unused = 0;
+    String *line_contents = split(line, ' ', &unused);
 
-    String sliced = slice(line, 0, 1);
-    if(line == S("v"))
+    if(line_contents[0] == S("v"))
     {
-      u32 unused_count = 0;
-      String *vertex = split(slice(line, 1), ' ', &unused_count);
-
       f32 vertices[3] = {};
       for(u32 j = 0; j < 3; j++)
       {
-        vertices[j] = (f32)atof(vertex[j].text);
+        vertices[j] = (f32)atof(line_contents[j + 1].text);
       }
 
-      obj.vertices_count++;
+      obj.vertices_count += 1;
       obj.vertices = (V3*)realloc(obj.vertices, obj.vertices_count * sizeof(V3));
-      memcpy(&obj.vertices[obj.vertices_count - 1], vertices, sizeof(V3));
+      memcpy(obj.vertices + obj.vertices_count - 1, vertices, sizeof(V3));
     }
-
-    if(slice(line, 0, 2) == S("vt"))
+    else if(line_contents[0] == S("vt"))
     {
-      u32 unused_count = 0;
-      String *uv = split(slice(line, 1), ' ', &unused_count);
-
       f32 uvs[2] = {};
       for(u32 j = 0; j < 2; j++)
       {
-        uvs[j] = (f32)atof(uv[j].text);
+        uvs[j] = (f32)atof(line_contents[j + 1].text);
       }
 
-      obj.uvs_count++;
+      obj.uvs_count += 1;
       obj.uvs = (V2*)realloc(obj.uvs, obj.uvs_count * sizeof(V2));
-      memcpy(&obj.uvs[obj.uvs_count - 1], uvs, sizeof(V2));
+      memcpy(obj.uvs + obj.uvs_count - 1, uvs, sizeof(V2));
     }
-
-    if(slice(line, 0, 2) == S("vn"))
+    else if(line_contents[0] == S("vn"))
     {
-      u32 unused_count = 0;
-      String *normal = split(slice(line, 1), ' ', &unused_count);
-
       f32 normals[3] = {};
       for(u32 j = 0; j < 3; j++)
       {
-        normals[j] = (f32)atof(normal[j].text);
+        normals[j] = (f32)atof(line_contents[j + 1].text);
       }
 
-      obj.normals_count++;
+      obj.normals_count += 1;
       obj.normals = (V3*)realloc(obj.normals, obj.normals_count * sizeof(V3));
-      memcpy(&obj.normals[obj.normals_count - 1], normals, sizeof(V3));
+      memcpy(obj.normals + obj.normals_count - 1, normals, sizeof(V3));
     }
-
-    if(slice(line, 0, 1) == S("f"))
-    {
-      u32 unused_count = 0;
-      String *face_str = split(slice(line, 1), ' ', &unused_count);
-
+    else if(line_contents[0] == S("f"))
+    {      
       Face face = {};
       for(u32 j = 0; j < 4; j++)
       {
-        String *indexes_str = split(face_str[j], '/', &unused_count);
+        u32 unused_count = 0;
+        String *indexes_string = split(line_contents[j + 1], '/', &unused_count);
         for(u32 k = 0; k < 3; k++)
         {
-          face.indexes[j].e[k] = (u32)atoi(indexes_str[k].text);
+          face.indexes[j].e[k] = (u32)atoi(indexes_string[k].text);
         }
       }
 
@@ -677,8 +614,34 @@ Obj parse_obj(char *file_path)
 
 Mesh mesh_from_obj(Obj obj)
 {
-  return {};
+  Mesh mesh = {};
+  mesh.vertices_count = obj.faces_count * 6;
+  mesh.vertices = (Vertex*)calloc(mesh.vertices_count, sizeof(Vertex));
+
+  u32 vi = 0;
+  u32 tri[6] = {2, 1, 0, 3, 2, 0};
+  for(u32 i = 0; i < obj.faces_count; i++)
+  {
+    Face face = obj.faces[i];
+    for(u32 j = 0; j < 6; j++)
+    {
+      u32 k = tri[j];
+      mesh.vertices[vi].position = obj.vertices[face.indexes[k].v - 1];
+      mesh.vertices[vi].uv       = obj.uvs     [face.indexes[k].u - 1];
+      mesh.vertices[vi].normal   = obj.normals [face.indexes[k].n - 1];
+      vi++;
+    }
+  }
+
+  return mesh;
 }
+
+struct Light
+{
+  V3 position;
+  V3 direction;
+  V4 color;
+};
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
@@ -692,10 +655,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   window_height = 600;
   window_width  = 640;
   window_height = 480;
+  #if 0
   window_width  = 50;
   window_height = 50;
-  #if 0
   #endif
+
+  test_slice();
+  test_split();
 
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
@@ -806,6 +772,21 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   Frame frame = {};
 
   Obj cube_obj = parse_obj("assets/cube.obj");
+  Mesh cube_obj_mesh = mesh_from_obj(cube_obj);
+
+  face_color_index = 0;
+  for(u32 i = 0; i < cube_obj_mesh.vertices_count; i++)
+  {
+    cube_obj_mesh.vertices[i].color = face_colors[face_color_index];  
+    if(i != 0 && (i % 6 == 0))
+    {
+      face_color_index++;
+    }
+  }
+
+  Light sun = {};
+  sun.position  = {-2, 0, 5};
+  sun.direction = { 2, 0, 5};
 
   for(bool running = true; running;)
   {
@@ -862,8 +843,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     }
     #endif
 
-    draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
-    draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    // draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
+    Matrix scale = create_scale_matrix(0.01f);
+    Matrix position = create_translation_matrix(200, 0, 0);
+    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
 
     // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
     // end_profile(cube_profile);
