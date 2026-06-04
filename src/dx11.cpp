@@ -364,6 +364,7 @@ struct RenderBuffer
   u32 area;
 
   f32 *z_buffer;
+  f32 *shadow_buffer;
 };
 
 RenderBuffer create_main_buffer(Pipeline pipeline, u32 width, u32 height)
@@ -374,8 +375,9 @@ RenderBuffer create_main_buffer(Pipeline pipeline, u32 width, u32 height)
   result.area = width * height;
 
   u32 pitch = width * sizeof(u32);
-  result.pixel_buffer = (u32*)calloc(1, pitch * height);
-  result.z_buffer     = (f32*)calloc(1, pitch * height);
+  result.pixel_buffer  = (u32*)calloc(1, pitch * height);
+  result.z_buffer      = (f32*)calloc(1, pitch * height);
+  result.shadow_buffer = (f32*)calloc(1, pitch * height);
 
   D3D11_TEXTURE2D_DESC texture_desc = {};
   texture_desc.Width            = width;
@@ -404,8 +406,9 @@ void clear_buffer(RenderBuffer *buffer)
   {
     for(u32 x = 0; x < buffer->width; x++)
     {
-      buffer->pixel_buffer[x + y * buffer->width] = 0x000000ff;
-      buffer->z_buffer    [x + y * buffer->width] = 0.0f;
+      buffer->pixel_buffer [x + y * buffer->width] = 0x000000ff;
+      buffer->z_buffer     [x + y * buffer->width] = 0.0f;
+      buffer->shadow_buffer[x + y * buffer->width] = 0.0f;
     }
   }
 }

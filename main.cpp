@@ -320,7 +320,13 @@ bool is_inside_triangle(V3 a, V3 b, V3 c, V3 bary)
   return passed_edge_a && passed_edge_b && passed_edge_c;
 }
 
-void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {}, f32 light_intensities = 0)
+f32 krzysztof(f32 x)
+{
+  x = max(0, x - 0.004f);
+  return (x * (6.2f * x + 0.5f)) / (x * (6.2f * x + 1.7f) + 0.06f);
+}
+
+void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {}, f32 light_intensities = 0, bool is_shadow_map = false)
 {
   V3 a = va.position;
   V3 b = vb.position;
@@ -384,6 +390,10 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
         V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
 
         f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
+        if(is_shadow_map)
+        {
+          buffer->shadow_buffer[(u32)x + (u32)y * buffer->width] = inv_w;
+        }
 
         if(texture.pixels)
         {
@@ -446,12 +456,23 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           }
         }
 
-        f32 *current_depth = &buffer->z_buffer[(u32)x + (u32)y * buffer->width];
-        if(inv_w > *current_depth)
+        if(0 <= x && x < buffer->width && 0 <= y && y < buffer->height)
         {
-          *current_depth = inv_w;
-          blend_color = blend_color * light_intensities;
-          draw_pixel_alpha(buffer, x, y, u32_from_v4(blend_color), coverage);
+          f32 *current_depth = &buffer->z_buffer[(u32)x + (u32)y * buffer->width];
+
+          if(current_depth != null && inv_w > *current_depth)
+          {
+            *current_depth = inv_w;
+            blend_color = blend_color * light_intensities;
+
+            for(u8 i = 0; i < 3; i++)
+            {
+              blend_color[i] = krzysztof(blend_color[i]);
+            }
+
+            V3 gamma = pow(blend_color.rgb, 1.0f/2.2f);
+            draw_pixel_alpha(buffer, x, y, u32_from_v4(V4_from(gamma, blend_color.w)), coverage);
+          }
         }
       }
     }
@@ -468,7 +489,45 @@ bool is_outside_frustum(V3 p)
   return outside_of_x || outside_of_y || outside_of_z;
 }
 
-void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height, Light light)
+V3 schlick_approx(V3 F0, V3 H, V3 V)
+{
+  V3 F = F0 + (V3{1,1,1} - F0) * powf(1 - dot(H, V), 5);
+  return F;
+}
+
+f32 G1(f32 NdotX, f32 k)
+{
+  return NdotX / (NdotX * (1 - k) + k);
+}
+
+f32 schlick_ggx(f32 roughness, V3 N, V3 V, V3 L)
+{
+  f32 k = powf((roughness + 1), 2) / 8;
+  f32 NdotL = dot(N, L);
+  f32 NdotV = dot(N, V);
+  return G1(NdotL, k) * G1(NdotV, k);
+}
+
+f32 ndf(f32 roughness, V3 N, V3 H)
+{
+  f32 a = roughness * roughness;
+  f32 a2 = a * a;
+  f32 d = dot(N, H);
+  f32 x = d * d * (a2 - 1) + 1;
+  return a2 / (PI * x * x);
+}
+
+V3 cook_torrance(f32 roughness, V3 V, V3 N, V3 H, V3 L, V3 F0)
+{
+  f32 D = ndf(roughness, N, H);
+  f32 G = schlick_ggx(roughness, N, V, L);
+  V3  F = schlick_approx(F0, H, V);
+  f32 NdotL = dot(N, L);
+  f32 NdotV = dot(N, V);
+  return F * (D * G / (4 * NdotV * NdotL));
+}
+
+void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height, Light light, bool is_shadow_map = false)
 {
   u32 total_triangles = mesh.vertices_count / 3;
 
@@ -485,10 +544,42 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
 
     V4 view_normal = V4_from(normal_dir, 0) * model_to_view;
     V4 view_light_dir = V4_from(light.direction, 0);
+    V3 N = normalize(V3_from(view_normal));
+
+    V3 light_pos_view = V3_from(V4_from(light.position, 1) * model_to_view);
+    V3 surface_position_view = V3_from(V4_from(a, 1) * model_to_view);
+    V3 L = normalize(light_pos_view - surface_position_view);
+    V3 V = normalize(-surface_position_view);
 
     f32 ambient = 0.1f;
     f32 light_intensities = clamp(dot(normalize(view_normal), normalize(view_light_dir)), 0, 1) + ambient;
 
+    V3 light_color = V3{1,1,1} * 100;
+    V3 F0 = {0.04f, 0.04f, 0.04f};
+    V3 albedo = {0.2f, 0.2f, 0.2f};
+    f32 metallic = 0.0f;
+    F0 = F0 + (albedo - F0) * metallic;
+
+    V3 surface_position = a;
+    V3 Lo = {0,0,0};
+
+    u32 light_count = 1;
+    for(u32 j = 0; j < light_count; j++)
+    {
+      V3 H = normalize(V + L);
+      f32 NdotL = max(dot(N, L), 0);
+      
+      V3 F = schlick_approx(F0, H, V);
+      V3 ks = F;
+      V3 kd = (V3{1,1,1} - F) * (1.0f - metallic);
+      
+      V3 diffuse = albedo / PI;
+      f32 roughness = 0.2f;
+      V3 specular = cook_torrance(roughness, V, N, H, L, F0);
+      Lo += (kd * diffuse + specular) * light_color * NdotL;
+    }
+      
+      
     for(u32 j = 0; j < 3; j++)
     {
       Vertex mv = mesh.vertices[(i * 3) + j];
@@ -522,7 +613,10 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
     if(signed_area >= 0) continue;
     #endif
 
-    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture, light_intensities);
+    // light_intensities = (Lo.x + Lo.y + Lo.z) / 3.0f;
+    light_intensities = Lo.x * 0.2126f + Lo.y * 0.7152f + Lo.z * 0.0722f;
+
+    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture, light_intensities, is_shadow_map);
   }
 }
 
@@ -563,6 +657,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   window_width  = 640;
   window_height = 480;
   #if 0
+  window_width  = 320;
+  window_height = 240;
   window_width  = 50;
   window_height = 50;
   #endif
@@ -734,6 +830,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     Matrix model_to_view = create_view_matrix(camera.position, camera.target);
     Matrix view_to_projection = create_perspective_projection_matrix(aspect_ratio, fov_y, z_near);
 
+    Matrix light_to_view = create_view_matrix(sun.position, sun.direction);
+    Matrix view_to_orthograpic = create_orthographic_projection_matrix(window_width / 2.0f, window_height / 2.0f, 0.01f, 100.0f);
+
     clear_buffer(&render_buffer);
 
     #if 0
@@ -754,6 +853,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
     Matrix scale = create_scale_matrix(0.01f);
     Matrix position = create_translation_matrix(200, 0, 0);
+    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun, true);
     draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
 
     // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);

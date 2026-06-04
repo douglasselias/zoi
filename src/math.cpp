@@ -2,6 +2,7 @@ f32 EPSILON = 0.000001f;
 
 f32 TURN_HALF = 0.5f;
 f32 TAU       = 6.28318530717958647692f;
+f32 PI        = 3.14159265358979323846f;
 
 #define GENERIC template<typename T>
 
@@ -28,6 +29,7 @@ f32 clamp(f32 value, f32 min_value, f32 max_value)
   value = max(value, min_value);
   return value;
 }
+
 
 struct V2 { f32 x, y; };
 
@@ -73,6 +75,16 @@ union V3
   f32 e[3];
 };
 V3 UP_BASE_AXIS = {0, 0, 1};
+
+V3 pow(V3 v, f32 exp)
+{
+  return
+  {
+    powf(v.x, exp),
+    powf(v.y, exp),
+    powf(v.z, exp),
+  };
+}
 
 f32 dot(V3 a, V3 b)
 {
@@ -120,6 +132,16 @@ V3 operator*(V3 a, f32 scalar)
   };
 }
 
+V3 operator*(f32 scalar, V3 a)
+{
+  return a * scalar;
+}
+
+V3 operator*(V3 a, V3 b)
+{
+  return { a.x * b.x, a.y * b.y, a.z * b.z };
+}
+
 V3 operator/(V3 a, f32 scalar)
 {
   return
@@ -128,6 +150,14 @@ V3 operator/(V3 a, f32 scalar)
     a.y / scalar,
     a.z / scalar,
   };
+}
+
+V3 operator+=(V3 &a, V3 b)
+{
+  a.x += b.x;
+  a.y += b.y;
+  a.z += b.z;
+  return a;
 }
 
 V3 operator/=(V3 &a, f32 scalar)
@@ -174,6 +204,48 @@ V4 blend(V4 a, V4 b, f32 t)
   result.z = blend(a.z, b.z, t);
   result.w = blend(a.w, b.w, t);
   return result;
+}
+
+V3 operator-(V3 a)
+{
+  return
+  {
+    -a.x,
+    -a.y,
+    -a.z,
+  };
+}
+
+V3 operator-(f32 scalar, V3 a)
+{
+  return
+  {
+    scalar-a.x,
+    scalar-a.y,
+    scalar-a.z,
+  };
+}
+
+V4 operator-(V4 a)
+{
+  return
+  {
+    -a.x,
+    -a.y,
+    -a.z,
+    -a.w,
+  };
+}
+
+V4 operator-(f32 scalar, V4 a)
+{
+  return
+  {
+    scalar-a.x,
+    scalar-a.y,
+    scalar-a.z,
+    scalar-a.w,
+  };
 }
 
 
@@ -659,4 +731,16 @@ V3 ndc_to_screen(V3 v, u32 width, u32 height)
   result.y = ((1 - v.y) / 2) * height;
   result.z = v.z; // TODO:
   return result;
+}
+
+Matrix create_orthographic_projection_matrix(f32 half_w, f32 half_h, f32 z_near, f32 z_far)
+{
+  f32 rcp_depth = 1.0f / (z_far - z_near);
+  return
+  {
+    1/half_w, 0,        0,                 0,
+    0,        1/half_h, 0,                 0,
+    0,        0,        rcp_depth,         0,
+    0,        0,        -z_near*rcp_depth, 1,
+  };
 }
