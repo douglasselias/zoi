@@ -1,4 +1,3 @@
-
 struct Time
 {
   s64 begin;

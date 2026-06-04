@@ -1,4 +1,3 @@
-
 union Indexes
 {
   struct { u32 v, u, n; };

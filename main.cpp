@@ -91,19 +91,21 @@ void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 colo
 
   s32 xpx1 = (s32)xend;
   s32 ypx1 = (s32)floorf(yend);
+  s32 _ypx2 = ypx1 + 1;
+
+  s32 _x0 = xpx1;
+  s32 _y0 = ypx1;
+  s32 _x1 = xpx1;
+  s32 _y1 = _ypx2;
 
   if(steep)
   {
-    draw_pixel_alpha(buffer, (f32)ypx1,     (f32)xpx1, color, rfpart(yend) * xgap);
-    draw_pixel_alpha(buffer, (f32)ypx1 + 1, (f32)xpx1, color,   frac(yend) * xgap);
-  }
-  else
-  {
-    draw_pixel_alpha(buffer, (f32)xpx1, (f32)ypx1,     color, rfpart(yend) * xgap);
-    draw_pixel_alpha(buffer, (f32)xpx1, (f32)ypx1 + 1, color,   frac(yend) * xgap);
+    swap(&_x0, &_y0);
+    swap(&_x1, &_y1);
   }
 
-  ///////////////
+  draw_pixel_alpha(buffer, (f32)_x0, (f32)_y0, color, rfpart(yend) * xgap);
+  draw_pixel_alpha(buffer, (f32)_x1, (f32)_y1, color,   frac(yend) * xgap);
 
   // Last endpoint
   f32 xend2 = roundf(x1);
@@ -112,17 +114,21 @@ void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 colo
 
   s32 xpx2 = (s32)xend2;
   s32 ypx2 = (s32)floorf(yend2);
+  s32 ypx3 = ypx2 + 1;
+
+  s32 __x0 = xpx2;
+  s32 __y0 = ypx2;
+  s32 __x1 = xpx2;
+  s32 __y1 = ypx3;
 
   if(steep)
   {
-    draw_pixel_alpha(buffer, (f32)ypx2,     (f32)xpx2, color, rfpart(yend2) * xgap2);
-    draw_pixel_alpha(buffer, (f32)ypx2 + 1, (f32)xpx2, color,   frac(yend2) * xgap2);
+    swap(&__x0, &__y0);
+    swap(&__x1, &__y1);
   }
-  else
-  {
-    draw_pixel_alpha(buffer, (f32)xpx2, (f32)ypx2,     color, rfpart(yend2) * xgap2);
-    draw_pixel_alpha(buffer, (f32)xpx2, (f32)ypx2 + 1, color,   frac(yend2) * xgap2);
-  }
+
+  draw_pixel_alpha(buffer, (f32)xpx2, (f32)ypx2, color, rfpart(yend2) * xgap2);
+  draw_pixel_alpha(buffer, (f32)xpx2, (f32)ypx3, color,   frac(yend2) * xgap2);
 
   f32 intery = yend + slope;
   for(s32 x = xpx1 + 1; x < xpx2; x++)
@@ -135,18 +141,12 @@ void draw_line_aa(RenderBuffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, u32 colo
 
     if(steep)
     {
-      // draw_pixel_alpha(buffer, floorf(intery),     (f32)x, color, 1.0f - f);
-      // draw_pixel_alpha(buffer, floorf(intery) + 1, (f32)x, color, f);
       swap(&a0, &a1);
       swap(&b0, &b1);
     }
-    // else
-    {
-      // draw_pixel_alpha(buffer, (f32)x, floorf(intery),     color, 1.0f - f);
-      // draw_pixel_alpha(buffer, (f32)x, floorf(intery) + 1, color, f);
-      draw_pixel_alpha(buffer, a0, a1, color, 1.0f - f);
-      draw_pixel_alpha(buffer, b0, b1, color, f);
-    }
+    
+    draw_pixel_alpha(buffer, a0, a1, color, 1.0f - f);
+    draw_pixel_alpha(buffer, b0, b1, color, f);
 
     intery += slope;
   }
@@ -365,7 +365,7 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
       V3 bary = calculate_barycentric(p, a, b, c);
       bool inside = is_inside_triangle(a, b, c, bary);
 
-      // TODO: Hollow triangle
+      // Hollow triangle
       #if 0
       f32 area = bary.x + bary.y + bary.z;
       bool passed_edge_a = (bary.x / area) < 0.05f || (bary.x == 0 && is_cb_top_left);
@@ -373,7 +373,7 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
       bool passed_edge_c = (bary.z / area) < 0.05f || (bary.z == 0 && is_ba_top_left);
       #endif
  
-      // TODO: Show overdraw
+      // Show overdraw
       #if 0
       bool passed_edge_a = bary.x <= 0;
       bool passed_edge_b = bary.y <= 0;
@@ -479,8 +479,6 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
   }
 }
 
-f32 angle = 0;
-
 bool is_outside_frustum(V3 p)
 {
   bool outside_of_x = p.x > 1 || p.x < -1;
@@ -578,8 +576,7 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
       V3 specular = cook_torrance(roughness, V, N, H, L, F0);
       Lo += (kd * diffuse + specular) * light_color * NdotL;
     }
-      
-      
+
     for(u32 j = 0; j < 3; j++)
     {
       Vertex mv = mesh.vertices[(i * 3) + j];
@@ -605,16 +602,7 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
       continue;
     }
 
-    #if 0
-    // Backface culling: signed area < 0 => CW (front face). Skip CCW triangles.
-    V3 ab = vs[1].position - vs[0].position;
-    V3 ac = vs[2].position - vs[0].position;
-    f32 signed_area = ab.x * ac.y - ab.y * ac.x;
-    if(signed_area >= 0) continue;
-    #endif
-
-    // light_intensities = (Lo.x + Lo.y + Lo.z) / 3.0f;
-    light_intensities = Lo.x * 0.2126f + Lo.y * 0.7152f + Lo.z * 0.0722f;
+    light_intensities = (Lo.x + Lo.y + Lo.z) / 3.0f;
 
     draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture, light_intensities, is_shadow_map);
   }
@@ -776,6 +764,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
   Obj cube_obj = parse_obj("assets/cube.obj");
   Mesh cube_obj_mesh = mesh_from_obj(cube_obj);
+  f32 rot_angle = 0;
 
   face_color_index = 0;
   for(u32 i = 0; i < cube_obj_mesh.vertices_count; i++)
@@ -853,20 +842,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
     Matrix scale = create_scale_matrix(0.01f);
     Matrix position = create_translation_matrix(200, 0, 0);
-    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun, true);
-    draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
+    Matrix rotation_x = create_x_axis_rotation_matrix(rot_angle + 0.001f);
+    Matrix rotation_y = create_y_axis_rotation_matrix(rot_angle + 0.005f);
+    Matrix rotation_z = create_z_axis_rotation_matrix(rot_angle + 0.009f);
+    Matrix rotation = rotation_x * rotation_y * rotation_z;
+    rot_angle += 0.1f * dt;
+    // draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun, true);
+    ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
+    draw_mesh(&render_buffer, cube_obj_mesh, rotation * position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
+    end_profile(cube_profile);
 
-    // ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
-    // end_profile(cube_profile);
-
-    snprintf(fps_text, sizeof(fps_text), "FPS: %.4f", 1/frame.rate);
+    snprintf(fps_text, sizeof(fps_text), "%.4fms", 1/frame.rate);
     draw_text(&render_buffer, 4, 3, fps_text);
-    
-    // snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
-    // draw_text(&render_buffer, 4, 13, fps_text);
-
-    snprintf(fps_text, sizeof(fps_text), "Dot: %.4f", angle);
+    snprintf(fps_text, sizeof(fps_text), "%.2f FPS", frame.rate);
     draw_text(&render_buffer, 4, 13, fps_text);
+    snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
+    draw_text(&render_buffer, 4, 23, fps_text);
 
     draw_frame(pipeline, &render_buffer);
 

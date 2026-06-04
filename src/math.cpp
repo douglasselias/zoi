@@ -18,6 +18,13 @@ void swap(f32 *a, f32 *b)
   *b = c;
 }
 
+void swap(s32 *a, s32 *b)
+{
+  s32 c = *a;
+  *a = *b;
+  *b = c;
+}
+
 f32 blend(f32 a, f32 b, f32 t)
 {
   return (1 - t) * a + t * b;
@@ -666,23 +673,6 @@ Matrix create_xyz_axis_rotation_matrix(V3 v)
 {
   return create_xyz_axis_rotation_matrix(v.x, v.y, v.z);
 }
-
-
-// struct CameraAxes { V3 forward, left, up; };
-
-// CameraAxes get_camera_axes(V3 position, V3 target, V3 up_base_axis = UP_BASE_AXIS)
-// {
-//   CameraAxes axes = {};
-
-//   // Camera's local +X axis (points away from target, opposite to view direction)
-//   axes.forward = normalize(position - target);
-//   axes.left    = cross(up_base_axis, axes.forward);
-//   axes.up      = cross(axes.forward, axes.left);
-
-//   // ASSERT(floats_are_equal(length(axes.forward), 1.0f), STR("Forward is not normalized"));
-
-//   return axes;
-// }
 
 Matrix create_view_matrix(V3 position, V3 target, V3 up_base_axis = UP_BASE_AXIS)
 {
