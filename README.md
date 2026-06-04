@@ -2,7 +2,7 @@
 
 A software renderer to understand 3D graphics programming.
 
-[!Demo](https://github.com/douglasselias/zoi/raw/refs/heads/main/demo.mp4)
+[![Demo](https://github.com/douglasselias/zoi/raw/refs/heads/main/demo.mp4)](https://github.com/douglasselias/zoi/raw/refs/heads/main/demo.mp4)
 
 
 ## Features
