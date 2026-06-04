@@ -2,6 +2,11 @@
 
 A software renderer to understand 3D graphics programming.
 
+<video controls width="500">
+  <source src="demo.mp4" type="video/mp4" />
+</video>
+
+
 ## Features
 
 - From scratch software rasterizer
