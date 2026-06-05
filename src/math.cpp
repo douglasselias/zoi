@@ -359,8 +359,6 @@ CameraAxes get_camera_axes(V3 position, V3 target, V3 up_base_axis = UP_BASE_AXI
   axes.left    = cross(up_base_axis, axes.forward);
   axes.up      = cross(axes.forward, axes.left);
 
-  // ASSERT(floats_are_equal(length(axes.forward), 1.0f), STR("Forward is not normalized"));
-
   return axes;
 }
 
@@ -504,18 +502,6 @@ union Matrix
   }
 };
 
-// Matrix operator -(Matrix m)
-// {
-//   Matrix result = {};
-
-//   for(u8 row = 0; row < 4; row++)
-//   {
-//     result[row] = -m[row];
-//   }
-
-//   return result;
-// }
-
 Matrix operator *(Matrix a, Matrix b)
 {
   Matrix result = {};
@@ -554,21 +540,6 @@ V4 operator *(V4 v, Matrix m)
   
   return result;
 }
-
-// Matrix transpose(Matrix matrix)
-// {
-//   Matrix result = {};
-
-//   for(u8 i = 0; i < 4; i++)
-//   {
-//     for(u8 j = 0; j < 4; j++)
-//     {
-//       result[i][j] = matrix[j][i];
-//     }
-//   }
-
-//   return result;
-// }
 
 Matrix ID_MATRIX =
 {
@@ -719,7 +690,7 @@ V3 ndc_to_screen(V3 v, u32 width, u32 height)
   V3 result = {};
   result.x = ((v.x + 1) / 2) * width;
   result.y = ((1 - v.y) / 2) * height;
-  result.z = v.z; // TODO:
+  result.z = v.z;
   return result;
 }
 
