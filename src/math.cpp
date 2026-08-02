@@ -1,5 +1,4 @@
-f32 EPSILON = 0.000001f;
-
+f32 EPSILON   = 0.000001f;
 f32 TURN_HALF = 0.5f;
 f32 TAU       = 6.28318530717958647692f;
 f32 PI        = 3.14159265358979323846f;
@@ -11,19 +10,7 @@ GENERIC T radian_from_turn(T turn) { return turn * (T)TAU; }
 f32 frac(f32 x) { return x - floorf(x); }
 f32 rfpart(f32 x) { return 1.0f - frac(x); }
 
-void swap(f32 *a, f32 *b)
-{
-  f32 c = *a;
-  *a = *b;
-  *b = c;
-}
-
-void swap(s32 *a, s32 *b)
-{
-  s32 c = *a;
-  *a = *b;
-  *b = c;
-}
+GENERIC void swap(T *a, T *b) { T c = *a; *a = *b; *b = c; }
 
 f32 blend(f32 a, f32 b, f32 t)
 {
@@ -36,7 +23,6 @@ f32 clamp(f32 value, f32 min_value, f32 max_value)
   value = max(value, min_value);
   return value;
 }
-
 
 struct V2 { f32 x, y; };
 
@@ -198,7 +184,7 @@ V3 normalize(V3 v)
 union V4
 {
   struct { f32 x, y, z, w; };
-  struct { V3 rgb; f32 w; };
+  struct { V3 rgb; f32 a; };
 
   f32& operator[](u8 i) { return (&x)[i]; }
 };

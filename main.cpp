@@ -167,7 +167,7 @@ union Triangle
   V3 vertices[3];
 };
 
-enum TextureFilter
+enum TextureFilter : u8
 {
   NONE,
   BILINEAR,
@@ -189,42 +189,8 @@ struct Mesh
   Texture texture;
 };
 
-struct Light
-{
-  V3 position;
-  V3 direction;
-  V4 color;
-};
-
-Texture create_checkboard_texture(u32 width, u32 height)
-{
-  Texture texture = {};
-  texture.width  = width;
-  texture.height = height;
-  texture.pixels = (u32*)malloc(texture.width * texture.height * sizeof(u32));
-
-  for(u32 y = 0; y < texture.height; y++)
-  {
-    for(u32 x = 0; x < texture.width; x++)
-    {
-      u32 tile_size = 1;
-      if(((x / tile_size) + (y / tile_size)) % 2 == 0)
-      {
-        texture.pixels[x + y * texture.width] = 0xffffffff;
-      }
-      else
-      {
-        texture.pixels[x + y * texture.width] = 0x000000ff;
-      }
-    }
-  }
-
-  return texture;
-}
-
 void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
 {
-  u32 cursor_x = x;
   while(*text)
   {
     u8 c = *text;
@@ -235,67 +201,50 @@ void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text)
         s32 should_paint = font[c][row] & (1 << col);
         if(should_paint)
         {
-          draw_pixel_alpha(render_buffer, (f32)(cursor_x + col), (f32)(y + row), 0xffffffff, 1);
+          draw_pixel_alpha(render_buffer, (f32)(x + col), (f32)(y + row), 0xffffffff, 1);
         }
       }
     }
 
     text++;
-    cursor_x += 8;
+    x += 8;
   }
 }
 
-void generate_mipmaps(Texture *texture)
+void draw_text(RenderBuffer *render_buffer, u32 x, u32 y, char *text, u32 scale = 1)
 {
-  texture->mipmaps_count = (u32)log2f((f32)texture->width);
-  texture->mipmaps = (Texture*)malloc(texture->mipmaps_count * sizeof(Texture));
-
-  for(u32 i = 0; i < texture->mipmaps_count; i++)
+  while(*text)
   {
-    Texture *src = (i == 0) ? texture : &texture->mipmaps[i - 1];
-    Texture *mipmap = &texture->mipmaps[i];
-    mipmap->width  = src->width  / 2;
-    mipmap->height = src->height / 2;
-    mipmap->pixels = (u32*)malloc(mipmap->width * mipmap->height * sizeof(u32));
-
-    for(u32 y = 0; y < mipmap->height; y++)
+    u8 c = *text;
+    for(u32 row = 0; row < 8; row++)
     {
-      for(u32 x = 0; x < mipmap->width; x++)
+      for(u32 col = 0; col < 8; col++)
       {
-        u32 u = x;
-        u32 v = y;
-        u32 s = x + 1;
-        u32 t = y + 1;
-
-        u32 sample_a = src->pixels[u + v * src->width];
-        u32 sample_b = src->pixels[s + v * src->width];
-        u32 sample_c = src->pixels[u + t * src->width];
-        u32 sample_d = src->pixels[s + t * src->width];
-        V4 sample0 = v4_from_u32(sample_a);
-        V4 sample1 = v4_from_u32(sample_b);
-        V4 sample2 = v4_from_u32(sample_c);
-        V4 sample3 = v4_from_u32(sample_d);
-        
-        V4 blend0 = blend(sample0, sample1, 0.5f);
-        V4 blend1 = blend(sample2, sample3, 0.5f);
-        V4 blend2 = blend(blend0, blend1, 0.5f);
-
-        u32 color = u32_from_v4(blend2);
-        mipmap->pixels[x + y * mipmap->width] = color;
+        s32 should_paint = font[c][row] & (1 << col);
+        if(should_paint)
+        {
+          for(u32 sy = 0; sy < scale; sy++)
+          {
+            for(u32 sx = 0; sx < scale; sx++)
+            {
+              draw_pixel_alpha(render_buffer, (f32)(x + col * scale + sx), (f32)(y + row * scale + sy), 0xffffffff, 1);
+            }
+          }
+        }
       }
     }
+
+    text++;
+    x += 8 * scale;
   }
 }
 
 bool is_top_or_left_edge(V3 a, V3 b)
 {
   V3 c = b - a;
-  // TOP
-  if(c.y == 0 && c.x > 0) return true;
-  // LEFT
-  if(c.y < 0) return true;
-
-  return false;
+  bool is_top  = c.y == 0 && c.x > 0;
+  bool is_left = c.y < 0;
+  return is_top || is_left;
 }
 
 V3 calculate_barycentric(V3 p, V3 a, V3 b, V3 c)
@@ -320,13 +269,7 @@ bool is_inside_triangle(V3 a, V3 b, V3 c, V3 bary)
   return passed_edge_a && passed_edge_b && passed_edge_c;
 }
 
-f32 krzysztof(f32 x)
-{
-  x = max(0, x - 0.004f);
-  return (x * (6.2f * x + 0.5f)) / (x * (6.2f * x + 1.7f) + 0.06f);
-}
-
-void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {}, f32 light_intensities = 0, bool is_shadow_map = false)
+void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Texture texture = {})
 {
   V3 a = va.position;
   V3 b = vb.position;
@@ -390,10 +333,6 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
         V4 blend_color = color_a * weight_a + color_b * weight_b + color_c * weight_c;
 
         f32 inv_w = (1/va.w) * weight_a + (1/vb.w) * weight_b + (1/vc.w) * weight_c;
-        if(is_shadow_map)
-        {
-          buffer->shadow_buffer[(u32)x + (u32)y * buffer->width] = inv_w;
-        }
 
         if(texture.pixels)
         {
@@ -407,16 +346,6 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           f32 uvy0 = sample_uv.y;
           f32 uvx1 = sample_uv.x + 1;
           f32 uvy1 = sample_uv.y + 1;
-
-          #if 0
-          f32 dx = uvx1 - uvx0;
-          f32 dy = uvy1 - uvy0;
-          u32 mip_level = (u32)log2f(max(dx, dy));
-          texture = texture.mipmaps[mip_level];
-          // Recalculate uv
-          sample_uv = ((uva + uvb + uvc) / inv_w) * V2{(f32)texture.width, (f32)texture.height};
-          #endif
-
           u32 sample_a = texture.pixels[(u32)uvx0 + (u32)uvy0 * texture.width];
           
           switch(texture.filter)
@@ -463,11 +392,11 @@ void draw_triangle(RenderBuffer *buffer, Vertex va, Vertex vb, Vertex vc, Textur
           if(current_depth != null && inv_w > *current_depth)
           {
             *current_depth = inv_w;
-            blend_color = blend_color * light_intensities;
+            blend_color = blend_color;
 
             for(u8 i = 0; i < 3; i++)
             {
-              blend_color[i] = krzysztof(blend_color[i]);
+              blend_color[i] = (blend_color[i]);
             }
 
             V3 gamma = pow(blend_color.rgb, 1.0f/2.2f);
@@ -487,45 +416,7 @@ bool is_outside_frustum(V3 p)
   return outside_of_x || outside_of_y || outside_of_z;
 }
 
-V3 schlick_approx(V3 F0, V3 H, V3 V)
-{
-  V3 F = F0 + (V3{1,1,1} - F0) * powf(1 - dot(H, V), 5);
-  return F;
-}
-
-f32 G1(f32 NdotX, f32 k)
-{
-  return NdotX / (NdotX * (1 - k) + k);
-}
-
-f32 schlick_ggx(f32 roughness, V3 N, V3 V, V3 L)
-{
-  f32 k = powf((roughness + 1), 2) / 8;
-  f32 NdotL = dot(N, L);
-  f32 NdotV = dot(N, V);
-  return G1(NdotL, k) * G1(NdotV, k);
-}
-
-f32 ndf(f32 roughness, V3 N, V3 H)
-{
-  f32 a = roughness * roughness;
-  f32 a2 = a * a;
-  f32 d = dot(N, H);
-  f32 x = d * d * (a2 - 1) + 1;
-  return a2 / (PI * x * x);
-}
-
-V3 cook_torrance(f32 roughness, V3 V, V3 N, V3 H, V3 L, V3 F0)
-{
-  f32 D = ndf(roughness, N, H);
-  f32 G = schlick_ggx(roughness, N, V, L);
-  V3  F = schlick_approx(F0, H, V);
-  f32 NdotL = dot(N, L);
-  f32 NdotV = dot(N, V);
-  return F * (D * G / (4 * NdotV * NdotL));
-}
-
-void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height, Light light, bool is_shadow_map = false)
+void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Matrix view_to_projection, u32 render_width, u32 render_height)
 {
   u32 total_triangles = mesh.vertices_count / 3;
 
@@ -537,45 +428,6 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
     V3 a = mesh.vertices[(i * 3) + 0].position;
     V3 b = mesh.vertices[(i * 3) + 1].position;
     V3 c = mesh.vertices[(i * 3) + 2].position;
-
-    V3 normal_dir = cross(b - a, c - a);
-
-    V4 view_normal = V4_from(normal_dir, 0) * model_to_view;
-    V4 view_light_dir = V4_from(light.direction, 0);
-    V3 N = normalize(V3_from(view_normal));
-
-    V3 light_pos_view = V3_from(V4_from(light.position, 1) * model_to_view);
-    V3 surface_position_view = V3_from(V4_from(a, 1) * model_to_view);
-    V3 L = normalize(light_pos_view - surface_position_view);
-    V3 V = normalize(-surface_position_view);
-
-    f32 ambient = 0.1f;
-    f32 light_intensities = clamp(dot(normalize(view_normal), normalize(view_light_dir)), 0, 1) + ambient;
-
-    V3 light_color = V3{1,1,1} * 100;
-    V3 F0 = {0.04f, 0.04f, 0.04f};
-    V3 albedo = {0.2f, 0.2f, 0.2f};
-    f32 metallic = 0.0f;
-    F0 = F0 + (albedo - F0) * metallic;
-
-    V3 surface_position = a;
-    V3 Lo = {0,0,0};
-
-    u32 light_count = 1;
-    for(u32 j = 0; j < light_count; j++)
-    {
-      V3 H = normalize(V + L);
-      f32 NdotL = max(dot(N, L), 0);
-      
-      V3 F = schlick_approx(F0, H, V);
-      V3 ks = F;
-      V3 kd = (V3{1,1,1} - F) * (1.0f - metallic);
-      
-      V3 diffuse = albedo / PI;
-      f32 roughness = 0.2f;
-      V3 specular = cook_torrance(roughness, V, N, H, L, F0);
-      Lo += (kd * diffuse + specular) * light_color * NdotL;
-    }
 
     for(u32 j = 0; j < 3; j++)
     {
@@ -602,9 +454,7 @@ void draw_mesh(RenderBuffer *render_buffer, Mesh mesh, Matrix model_to_view, Mat
       continue;
     }
 
-    light_intensities = (Lo.x + Lo.y + Lo.z) / 3.0f;
-
-    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture, light_intensities, is_shadow_map);
+    draw_triangle(render_buffer, vs[0], vs[1], vs[2], mesh.texture);
   }
 }
 
@@ -636,15 +486,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
   u32 window_width  = 2560;
   u32 window_height = 1080;
+  window_width  = 1920;
+  window_height = 1080;
   window_width  = 1280;
   window_height = 720;
+  #if 0
   window_width  = 1024;
   window_height = 768;
   window_width  = 800;
   window_height = 600;
   window_width  = 640;
   window_height = 480;
-  #if 0
   window_width  = 320;
   window_height = 240;
   window_width  = 50;
@@ -656,7 +508,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
   Window window = create_window("Zoi - A software renderer", window_width, window_height);
   Pipeline pipeline = init_gfx(window);
-  u32 render_scale = 4;
+  u32 render_scale = 1;
   RenderBuffer render_buffer = create_main_buffer(pipeline, window_width / render_scale, window_height / render_scale);
 
   CameraActions camera_actions = {};
@@ -665,10 +517,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   f32 fov_y  = 0.25f / 2.0f;
   f32 z_near = 0.01f;
   f32 aspect_ratio = (f32)window_width / (f32)window_height;
-
-  Texture checkerboard_texture = create_checkboard_texture(64, 64);
-  checkerboard_texture.filter = BILINEAR;
-  generate_mipmaps(&checkerboard_texture);
 
   Triangle top = {};
   top.vertices[0] = {0.9f, -0.8f,  1.0f};
@@ -691,7 +539,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   };
 
   Mesh quad = {};
-  quad.texture = checkerboard_texture;
   quad.vertices_count = 6;
   quad.vertices = (Vertex*)malloc(quad.vertices_count * sizeof(Vertex));
   for(u32 i = 0; i < quad.vertices_count; i++)
@@ -748,12 +595,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   for(u32 i = 0; i < cube_mesh.vertices_count; i++)
   {
     cube_mesh.vertices[i].position = cube[i];
-    cube_mesh.vertices[i].color = face_colors[face_color_index];
-    
-    if(i != 0 && (i % 6 == 0))
-    {
-      face_color_index++;
-    }
+    cube_mesh.vertices[i].color = face_colors[i / 6];
   }
 
   s64 cpu_frequency = get_os_timer_frequency();
@@ -769,16 +611,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
   face_color_index = 0;
   for(u32 i = 0; i < cube_obj_mesh.vertices_count; i++)
   {
-    cube_obj_mesh.vertices[i].color = face_colors[face_color_index];  
-    if(i != 0 && (i % 6 == 0))
-    {
-      face_color_index++;
-    }
+    cube_obj_mesh.vertices[i].color = face_colors[i/6];
   }
-
-  Light sun = {};
-  sun.position  = {-2, 0, 5};
-  sun.direction = { 2, 0, 5};
 
   for(bool running = true; running;)
   {
@@ -790,10 +624,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     {
       switch(window_message_type)
       {
+        case MSG_QUIT: running = false; break;
         case MSG_NONE: break;
-        case MSG_QUIT:
-          running = false;
-        break;
       }
     }
 
@@ -819,7 +651,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     Matrix model_to_view = create_view_matrix(camera.position, camera.target);
     Matrix view_to_projection = create_perspective_projection_matrix(aspect_ratio, fov_y, z_near);
 
-    Matrix light_to_view = create_view_matrix(sun.position, sun.direction);
     Matrix view_to_orthograpic = create_orthographic_projection_matrix(window_width / 2.0f, window_height / 2.0f, 0.01f, 100.0f);
 
     clear_buffer(&render_buffer);
@@ -838,7 +669,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     }
     #endif
 
-    // draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
+    draw_mesh(&render_buffer, quad, model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
     // draw_mesh(&render_buffer, cube_mesh, model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
     Matrix scale = create_scale_matrix(0.01f);
     Matrix position = create_translation_matrix(200, 0, 0);
@@ -847,17 +678,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     Matrix rotation_z = create_z_axis_rotation_matrix(rot_angle + 0.009f);
     Matrix rotation = rotation_x * rotation_y * rotation_z;
     rot_angle += 0.1f * dt;
-    // draw_mesh(&render_buffer, cube_obj_mesh, position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun, true);
     ProfileBlock *cube_profile = begin_profile("Cube", cpu_frequency);
-    draw_mesh(&render_buffer, cube_obj_mesh, rotation * position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height, sun);
+    draw_mesh(&render_buffer, cube_obj_mesh, rotation * position * scale * model_to_view, view_to_projection, render_buffer.width, render_buffer.height);
     end_profile(cube_profile);
 
+    u32 font_scale = 4;
+    u32 text_y = 3;
+
     snprintf(fps_text, sizeof(fps_text), "%.4fms", 1/frame.rate);
-    draw_text(&render_buffer, 4, 3, fps_text);
+    draw_text(&render_buffer, 4, text_y, fps_text, font_scale);
+
+    text_y += font_scale * 10;
     snprintf(fps_text, sizeof(fps_text), "%.2f FPS", frame.rate);
-    draw_text(&render_buffer, 4, 13, fps_text);
+    draw_text(&render_buffer, 4, text_y, fps_text, font_scale);
+
+    text_y += font_scale * 10;
     snprintf(fps_text, sizeof(fps_text), "%s: %.4f", cube_profile->name, cube_profile->elapsed);
-    draw_text(&render_buffer, 4, 23, fps_text);
+    draw_text(&render_buffer, 4, text_y, fps_text, font_scale);
 
     draw_frame(pipeline, &render_buffer);
 
