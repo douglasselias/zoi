@@ -2,6 +2,8 @@
 
 A software renderer to understand 3D graphics programming.
 
+[Video Showcase](https://youtu.be/jEnuzdkxZaU)
+
 ## Features
 
 - From scratch software rasterizer
